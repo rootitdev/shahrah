@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Never commit infrastructure facts or secrets.
+.env
+*.env
+secrets/
+*.pem
+*.key
+/config/*.local.*
