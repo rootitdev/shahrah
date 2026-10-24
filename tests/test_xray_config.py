@@ -122,9 +122,9 @@ def test_stability_tuning_is_explicit_in_the_config(
     # keepalive on both sides: client-facing socket and the upstream connections
     inbound_sockopt = config["inbounds"][0]["streamSettings"]["sockopt"]
     freedom_sockopt = config["outbounds"][0]["streamSettings"]["sockopt"]
-    assert (
-        inbound_sockopt == freedom_sockopt == {"tcpKeepAliveIdle": 30, "tcpKeepAliveInterval": 15}
-    )
+    keepalive = {"tcpKeepAliveIdle": 30, "tcpKeepAliveInterval": 15}
+    assert inbound_sockopt == keepalive
+    assert freedom_sockopt == {**keepalive, "domainStrategy": "UseIPv4"}
 
 
 def test_server_resolves_names_itself_over_doh_ipv4_only(
