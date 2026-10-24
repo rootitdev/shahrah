@@ -9,7 +9,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -113,6 +113,48 @@ class RealityServer:
 
 
 @dataclass(frozen=True, slots=True)
+class Tuning:
+    """Stability knobs. Defaults suit ~1-3k users on one mid-size VPS; tune after load tests.
+
+    * ``dns_servers`` - the server resolves every destination itself, over DoH by default,
+      so names are never resolved through the VPS provider's (possibly poisoned) resolver.
+    * ``conn_idle_s`` / ``handshake_s`` - reap stalled connections instead of letting them pile up.
+    * ``buffer_size_kb`` - per-connection buffer. Xray's own default is large on x86, which
+      multiplies badly across tens of thousands of connections.
+    * ``tcp_keepalive_*`` - detect clients that vanished (mobile networks switching) so no
+      half-open "dead" connections linger.
+    """
+
+    dns_servers: tuple[str, ...] = (
+        "https+local://1.1.1.1/dns-query",
+        "https+local://8.8.8.8/dns-query",
+    )
+    conn_idle_s: int = 300
+    handshake_s: int = 4
+    buffer_size_kb: int = 128
+    tcp_keepalive_idle_s: int = 30
+    tcp_keepalive_interval_s: int = 15
+
+    def __post_init__(self) -> None:
+        if not self.dns_servers:
+            raise ConfigError("at least one DNS server is required")
+        for server in self.dns_servers:
+            if not server or any(ch.isspace() for ch in server):
+                raise ConfigError(f"invalid DNS server entry: {server!r}")
+        bounds = {
+            "conn_idle_s": (30, 3600),
+            "handshake_s": (2, 30),
+            "buffer_size_kb": (4, 2048),
+            "tcp_keepalive_idle_s": (5, 600),
+            "tcp_keepalive_interval_s": (1, 300),
+        }
+        for name, (low, high) in bounds.items():
+            value = getattr(self, name)
+            if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
+                raise ConfigError(f"{name} must be an integer in {low}..{high}: {value!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class ServerSettings:
     """One Xray server: which profile it serves and on which port."""
 
@@ -124,6 +166,7 @@ class ServerSettings:
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False
     stats_api_port: int | None = None  # loopback-only gRPC stats API for usage accounting
+    tuning: Tuning = field(default_factory=Tuning)
 
     def __post_init__(self) -> None:
         validate_port(self.port)

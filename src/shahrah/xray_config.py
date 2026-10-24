@@ -16,7 +16,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from .models import Profile, ServerSettings, User
+from .models import Profile, ServerSettings, Tuning, User
 
 PRIVATE_NETWORKS: tuple[str, ...] = (
     "0.0.0.0/8",
@@ -43,6 +43,13 @@ def _client(user: User, profile: Profile) -> dict[str, Any]:
     return client
 
 
+def _sockopt(tuning: Tuning) -> dict[str, Any]:
+    return {
+        "tcpKeepAliveIdle": tuning.tcp_keepalive_idle_s,
+        "tcpKeepAliveInterval": tuning.tcp_keepalive_interval_s,
+    }
+
+
 def _stream_settings(server: ServerSettings) -> dict[str, Any]:
     reality = server.reality
     stream: dict[str, Any] = {
@@ -58,6 +65,8 @@ def _stream_settings(server: ServerSettings) -> dict[str, Any]:
             "minClientVer": reality.min_client_ver,
         },
     }
+    tuning = server.tuning
+    stream["sockopt"] = _sockopt(tuning)
     if server.profile is Profile.REALITY_XHTTP:
         stream["xhttpSettings"] = {"path": server.xhttp_path, "mode": server.xhttp_mode}
     return stream
@@ -101,10 +110,25 @@ def render_server_config(
         "log": {"loglevel": log_level, "access": "none"},
         "inbounds": inbounds,
         "outbounds": [
-            {"tag": "direct", "protocol": "freedom", "settings": {"domainStrategy": "UseIPv4"}},
+            {
+                "tag": "direct",
+                "protocol": "freedom",
+                "settings": {"domainStrategy": "UseIPv4"},
+                "streamSettings": {"sockopt": _sockopt(server.tuning)},
+            },
             {"tag": "block", "protocol": "blackhole"},
         ],
         "routing": {"domainStrategy": "AsIs", "rules": rules},
+        "dns": {"servers": list(server.tuning.dns_servers), "queryStrategy": "UseIPv4"},
+        "policy": {
+            "levels": {
+                "0": {
+                    "handshake": server.tuning.handshake_s,
+                    "connIdle": server.tuning.conn_idle_s,
+                    "bufferSize": server.tuning.buffer_size_kb,
+                }
+            }
+        },
     }
 
     if server.stats_api_port is not None:
@@ -119,10 +143,8 @@ def render_server_config(
         )
         config["stats"] = {}
         config["api"] = {"tag": _API_TAG, "services": ["StatsService"]}
-        config["policy"] = {
-            "levels": {"0": {"statsUserUplink": True, "statsUserDownlink": True}},
-            "system": {"statsInboundUplink": True, "statsInboundDownlink": True},
-        }
+        config["policy"]["levels"]["0"].update({"statsUserUplink": True, "statsUserDownlink": True})
+        config["policy"]["system"] = {"statsInboundUplink": True, "statsInboundDownlink": True}
         rules.append({"type": "field", "inboundTag": [_API_INBOUND_TAG], "outboundTag": _API_TAG})
 
     rules.append({"type": "field", "ip": list(PRIVATE_NETWORKS), "outboundTag": "block"})

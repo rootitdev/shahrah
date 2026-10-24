@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shahrah.models import Profile, RealityServer, ServerSettings, User
+from shahrah.models import ConfigError, Profile, RealityServer, ServerSettings, Tuning, User
 from shahrah.xray_config import PRIVATE_NETWORKS, VISION_FLOW, dumps, render_server_config
 
 
@@ -99,3 +99,55 @@ def test_real_xray_accepts_generated_config(
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Configuration OK" in result.stdout + result.stderr
+
+
+def test_stability_tuning_is_explicit_in_the_config(
+    server: ServerSettings, users: list[User]
+) -> None:
+    config = render_server_config(server, users)
+    level = config["policy"]["levels"]["0"]
+    assert level["connIdle"] == 300
+    assert level["handshake"] == 4
+    assert level["bufferSize"] == 128  # bounded memory per connection
+    # stats flags are merged in without dropping the tuning
+    assert level["statsUserUplink"] is True
+    # keepalive on both sides: client-facing socket and the upstream connections
+    inbound_sockopt = config["inbounds"][0]["streamSettings"]["sockopt"]
+    freedom_sockopt = config["outbounds"][0]["streamSettings"]["sockopt"]
+    assert (
+        inbound_sockopt == freedom_sockopt == {"tcpKeepAliveIdle": 30, "tcpKeepAliveInterval": 15}
+    )
+
+
+def test_server_resolves_names_itself_over_doh_ipv4_only(
+    server: ServerSettings, users: list[User]
+) -> None:
+    dns = render_server_config(server, users)["dns"]
+    assert dns["queryStrategy"] == "UseIPv4"
+    assert all(s.startswith("https+local://") for s in dns["servers"])
+
+
+def test_tuning_overrides_flow_into_the_config(server: ServerSettings, users: list[User]) -> None:
+    tuned = replace(
+        server, tuning=Tuning(dns_servers=("localhost",), conn_idle_s=120, buffer_size_kb=64)
+    )
+    config = render_server_config(tuned, users)
+    assert config["dns"]["servers"] == ["localhost"]
+    assert config["policy"]["levels"]["0"]["connIdle"] == 120
+    assert config["policy"]["levels"]["0"]["bufferSize"] == 64
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"dns_servers": ()},
+        {"dns_servers": ("bad entry",)},
+        {"conn_idle_s": 5},
+        {"buffer_size_kb": 0},
+        {"buffer_size_kb": 10**6},
+        {"tcp_keepalive_interval_s": True},
+    ],
+)
+def test_invalid_tuning_is_rejected(kwargs: dict[str, object]) -> None:
+    with pytest.raises(ConfigError):
+        Tuning(**kwargs)  # type: ignore[arg-type]
