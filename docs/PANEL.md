@@ -78,3 +78,20 @@ are panel nodes.
 Online payment collection and a Telegram sales bot are intentionally outside this layer:
 PasarGuard has no payments, and they can be added later on top of its REST API without
 touching the VPN core.
+
+## Leak resistance for ready-made clients
+
+```bash
+shahrah panel client-template            # uploads "shahrah-leak-resistant", not made default
+shahrah panel client-template --make-default   # explicit: applies to ALL users' JSON configs
+```
+
+The template (`shahrah.client_template`) is checked with a real Xray binary merged exactly the way the
+panel merges it. It tunnels DNS (DoH as plain `https://` URLs, no fallback to the local resolver),
+never resolves destinations on the device, blocks IPv6 in the client and keeps local proxy ports on
+loopback. The server side resolves names itself over DoH and has TCP keepalive plus idle/handshake
+limits so vanished mobile clients do not leave dead connections behind.
+
+What a template **cannot** do: a browser's WebRTC bypasses a SOCKS/HTTP proxy and can reveal the real
+address in *proxy mode*. Use the client's TUN/VPN mode or disable WebRTC in the browser. A dedicated
+client with a kill-switch is a later phase; until then this remains a documented limitation.

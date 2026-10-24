@@ -9,7 +9,15 @@ from typing import Any
 import pytest
 
 from shahrah.models import ConfigError
-from shahrah.panel import PanelClient, PanelError, SyncPlan, apply_plan, plan_sync, sync
+from shahrah.panel import (
+    PanelClient,
+    PanelError,
+    SyncPlan,
+    apply_plan,
+    client_template_payload,
+    plan_sync,
+    sync,
+)
 
 REMARKS = {"exit-a": "Exit A", "exit-b": "Exit B", "cdn": "CDN"}
 
@@ -111,6 +119,7 @@ class FakePanel:
         self.hosts = {h["id"]: dict(h) for h in hosts}
         self.calls: list[tuple[str, str]] = []
         self.roles: list[dict[str, Any]] = []
+        self.templates: list[dict[str, Any]] = []
         self.users: dict[str, dict[str, Any]] = {}
         panel = self
 
@@ -142,6 +151,11 @@ class FakePanel:
                     self._reply(200, {"roles": panel.roles, "total": len(panel.roles)})
                 elif method == "POST" and self.path == "/api/admin-role":
                     panel.roles.append(body)
+                    self._reply(201, body)
+                elif method == "GET" and self.path == "/api/client_templates":
+                    self._reply(200, {"count": len(panel.templates), "templates": panel.templates})
+                elif method == "POST" and self.path == "/api/client_template":
+                    panel.templates.append(body)
                     self._reply(201, body)
                 elif method == "GET" and self.path.startswith("/api/user/"):
                     user = panel.users.get(self.path.rsplit("/", 1)[1])
@@ -279,3 +293,20 @@ def test_probe_user_requires_a_group(panel: FakePanel) -> None:
     client = PanelClient(panel.url, FakePanel.API_KEY)
     with pytest.raises(ConfigError, match="group"):
         client.ensure_probe_user("shahrah_probe", PROBE_UUID, [])
+
+
+def test_client_template_is_uploaded_once_and_not_made_default_silently(
+    panel: FakePanel,
+) -> None:
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    assert client.ensure_client_template("t", '{"a": 1}') is True
+    assert client.ensure_client_template("t", '{"a": 2}') is False  # never overwritten
+    assert len(panel.templates) == 1
+    assert panel.templates[0]["template_type"] == "xray_subscription"
+    assert panel.templates[0]["is_default"] is False
+    assert panel.templates[0]["content"] == '{"a": 1}'
+
+
+def test_client_template_rejects_invalid_json_before_contacting_the_panel() -> None:
+    with pytest.raises(ValueError, match="Expecting"):
+        client_template_payload("t", "{not json", make_default=False)

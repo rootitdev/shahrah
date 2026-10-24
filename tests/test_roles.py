@@ -8,8 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from shahrah.client_template import dumps, xray_client_template
 from shahrah.models import ConfigError
-from shahrah.panel import probe_user_payload
+from shahrah.panel import client_template_payload, probe_user_payload
 from shahrah.roles import brain_role, sales_manager_role
 
 
@@ -69,6 +70,11 @@ def test_presets_are_accepted_by_the_real_panel_models() -> None:
 
     UserCreate.model_validate(
         probe_user_payload("shahrah_probe", "5c1b2e0a-6f1d-4f43-9a38-3a3c9a4f9b11", [1])
+    )
+    from app.models.client_template import ClientTemplateCreate  # type: ignore[import-not-found]
+
+    ClientTemplateCreate.model_validate(
+        client_template_payload("t", dumps(xray_client_template()), make_default=False)
     )
     typo = brain_role()
     typo["permissions"]["hosts"]["updat"] = True

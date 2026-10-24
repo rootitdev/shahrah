@@ -210,3 +210,23 @@ def test_panel_wrong_key_is_reported_without_a_traceback(
         assert "401" in capsys.readouterr().err
     finally:
         fake.close()
+
+
+def test_cli_uploads_the_leak_resistant_template(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tests.test_panel import FakePanel
+
+    fake = FakePanel([])
+    try:
+        monkeypatch.setenv("SHAHRAH_PANEL_API_KEY", FakePanel.API_KEY)
+        assert main(["panel", "--panel-url", fake.url, "client-template"]) == 0
+        assert json.loads(capsys.readouterr().out) == {
+            "client_template": "created",
+            "is_default": False,
+        }
+        content = json.loads(fake.templates[0]["content"])
+        assert content["dns"]["disableFallback"] is True
+        assert content["routing"]["domainStrategy"] == "AsIs"
+    finally:
+        fake.close()

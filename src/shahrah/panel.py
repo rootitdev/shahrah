@@ -74,6 +74,17 @@ def probe_user_payload(username: str, vless_uuid: str, group_ids: Sequence[int])
     }
 
 
+def client_template_payload(name: str, content: str, *, make_default: bool) -> dict[str, Any]:
+    """``POST /api/client_template`` body for an Xray JSON subscription template."""
+    json.loads(content)  # refuse to upload something the panel would choke on later
+    return {
+        "name": name,
+        "template_type": "xray_subscription",
+        "content": content,
+        "is_default": make_default,
+    }
+
+
 class PanelClient:
     """Minimal PasarGuard REST client authenticated with an ``X-Api-Key``."""
 
@@ -134,6 +145,25 @@ class PanelClient:
         if any(role.get("name") == payload["name"] for role in roles):
             return False
         self._request("POST", "/api/admin-role", dict(payload))
+        return True
+
+    def ensure_client_template(
+        self, name: str, content: str, *, make_default: bool = False
+    ) -> bool:
+        """Upload an Xray subscription template unless one with that name exists.
+
+        It is not made the default unless asked: the default applies to every user's config, so
+        switching it is an explicit decision. An existing template is never overwritten.
+        """
+        data = self._request("GET", "/api/client_templates")
+        templates = data.get("templates", []) if isinstance(data, dict) else []
+        if any(t.get("name") == name for t in templates):
+            return False
+        self._request(
+            "POST",
+            "/api/client_template",
+            client_template_payload(name, content, make_default=make_default),
+        )
         return True
 
     def ensure_probe_user(self, username: str, vless_uuid: str, group_ids: Sequence[int]) -> bool:

@@ -14,7 +14,7 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import deploy, keys
+from . import client_template, deploy, keys
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Profile, User
@@ -79,6 +79,11 @@ def _build_parser() -> argparse.ArgumentParser:
     boot.add_argument("--probe-group-id", type=int, nargs="+", required=True)
     boot.add_argument("--probe-username", default="shahrah_probe")
     boot.add_argument("--probe-uuid", help="reuse an existing id (default: generate one)")
+    tmpl = panel_sub.add_parser("client-template", help="upload the leak-resistant Xray template")
+    tmpl.add_argument("--name", default="shahrah-leak-resistant")
+    tmpl.add_argument(
+        "--make-default", action="store_true", help="apply to ALL users (explicit choice)"
+    )
     sales = panel_sub.add_parser("sales-role", help="create a least-privilege sales role")
     sales.add_argument("--name", required=True)
     sales.add_argument("--template-id", type=int, nargs="+", required=True)
@@ -178,6 +183,16 @@ def _run_panel(args: argparse.Namespace) -> int:
                 "brain_role": "created" if role_created else "already existed",
                 "probe_user": {"uuid": user.uuid, "label": user.label},
                 "probe_user_state": "created" if user_created else "already existed",
+            }
+        elif args.panel_command == "client-template":
+            created = client.ensure_client_template(
+                args.name,
+                client_template.dumps(client_template.xray_client_template()),
+                make_default=args.make_default,
+            )
+            result = {
+                "client_template": "created" if created else "already existed",
+                "is_default": bool(created and args.make_default),
             }
         else:
             role = sales_manager_role(
