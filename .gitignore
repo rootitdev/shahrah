@@ -14,3 +14,7 @@ secrets/
 *.pem
 *.key
 /config/*.local.*
+state.json
+*.state.json
+brain.json
+report.json

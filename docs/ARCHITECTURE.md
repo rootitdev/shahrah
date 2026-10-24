@@ -120,3 +120,16 @@ Run on one developer machine with a real Xray REALITY node, a client and a local
 What this does **not** prove: behaviour with 1000-3000 *real* users on the Iranian internet,
 vanished peers on lossy mobile links (TCP keepalive is configured but cannot be simulated on
 loopback), CPU/memory at that scale, or throughput. Those need the server phase.
+
+## Standby rotation (spare IPs / domains)
+
+Shahrah ships no cloud-provider code, so a replacement IP or domain is provisioned **ahead of
+time** by the operator and registered as a normal endpoint and panel host, then listed under
+`"standby": ["spare-1", ...]` in `brain.json` (promotion order). Spares are probed like any
+other endpoint but stay hidden from clients (their panel host stays disabled) until:
+
+* an endpoint is declared burned: one healthy spare is promoted per burned endpoint; or
+* no non-standby endpoint is healthy at all (plain failover).
+
+When a burn is forgiven the spare is demoted again. `--on-burn` remains available for
+operators who also want to provision new spares automatically.

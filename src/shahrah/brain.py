@@ -20,6 +20,7 @@ from .models import ConfigError, Endpoint, Profile, User
 from .oracle import Decision, Mode, OracleConfig, OracleState, PathSpec, Probe, step
 from .panel import PanelError, SyncPlan
 from .prober import ProbeError, ProbeResult
+from .rotation import serving_ranking
 
 log = logging.getLogger("shahrah.brain")
 
@@ -41,6 +42,7 @@ class BrainConfig:
     interval_s: float = 30.0
     oracle: OracleConfig = field(default_factory=OracleConfig)
     burn: BurnConfig = field(default_factory=BurnConfig)
+    standby: tuple[str, ...] = ()  # spare endpoints, in promotion order (see rotation.py)
 
     def __post_init__(self) -> None:
         if not self.endpoints:
@@ -48,6 +50,14 @@ class BrainConfig:
         names = [endpoint.name for endpoint in self.endpoints]
         if len(set(names)) != len(names):
             raise ConfigError("endpoint names must be unique")
+        if set(self.standby) - set(names):
+            raise ConfigError(
+                f"standby refers to unknown endpoints: {sorted(set(self.standby) - set(names))}"
+            )
+        if len(set(self.standby)) != len(self.standby):
+            raise ConfigError("standby endpoints must be unique")
+        if len(self.standby) >= len(names):
+            raise ConfigError("at least one endpoint must be non-standby")
         unknown = set(self.remarks) - set(names)
         if unknown:
             raise ConfigError(f"remarks refer to unknown endpoints: {sorted(unknown)}")
@@ -78,6 +88,7 @@ class BrainConfig:
                 interval_s=float(data.get("interval_s", 30.0)),
                 oracle=oracle,
                 burn=burn,
+                standby=tuple(data.get("standby", ())),
             )
         except (KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ConfigError):
@@ -107,6 +118,7 @@ class Brain:
         self._report_sink = report_sink
         self._state = OracleState()
         self._burn_state = BurnState()
+        self._promoted: set[str] = set()
         self._synced_ranking: tuple[str, ...] | None = None
 
     @property
@@ -139,7 +151,12 @@ class Brain:
 
         self._publish_report(results)
         self._detect_burn(results)
-        self._sync_panel(decision.ranking)
+        serving = serving_ranking(decision.ranking, self._config.standby, self._burn_state.burned)
+        promoted = {n for n in serving if n in self._config.standby}
+        if promoted != self._promoted:
+            log.warning("standby endpoints in service: %s", sorted(promoted) or "none")
+            self._promoted = promoted
+        self._sync_panel(serving)
         return decision
 
     def _publish_report(self, results: Sequence[ProbeResult]) -> None:
