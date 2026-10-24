@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import socket
+import ssl
 import subprocess
 import threading
 import time
@@ -251,3 +252,50 @@ def test_one_xray_process_serves_vision_and_xhttp_on_two_ports(
         results = {r.endpoint: r for r in session.probe_all(timeout=10)}
     assert results["vision"].ok, results["vision"].detail
     assert results["xhttp"].ok, results["xhttp"].detail
+
+
+@pytest.mark.e2e
+def test_active_probes_see_the_real_target_site_and_cannot_break_the_server(
+    xray_bin: str, real_keypair: tuple[str, str], tmp_path: Path
+) -> None:
+    """A scanner without credentials must get the genuine site, never a VPN signature."""
+    if not _internet_available():
+        pytest.skip("needs internet access (REALITY borrows a real TLS handshake)")
+    private, public = real_keypair
+    user = User.create("shahrah-probe")
+    port = _free_port()
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=RealityServer(target_host=E2E_TARGET, private_key=private, short_ids=("ab12",)),
+        listen="127.0.0.1",
+        port=port,
+        allow_non_443=True,
+    )
+    endpoint = Endpoint("ok", "127.0.0.1", port, Profile.REALITY_VISION, public, "ab12", E2E_TARGET)
+    with run_server(xray_bin, server, [user], tmp_path):
+        # 1. A plain TLS client with no key. Default context = full certificate validation, so
+        #    the handshake only succeeds if the server relays the *real* site's certificate.
+        context = ssl.create_default_context()
+        with (
+            socket.create_connection(("127.0.0.1", port), timeout=10) as raw,
+            context.wrap_socket(raw, server_hostname=E2E_TARGET) as tls,
+        ):
+            subject = dict(item[0] for item in tls.getpeercert()["subject"])
+            assert tls.version() in {"TLSv1.3", "TLSv1.2"}
+        assert subject.get("commonName") or subject  # a genuine, validated certificate
+
+        # 2. Garbage and plain HTTP must neither crash the server nor reveal an Xray banner.
+        for payload in (b"GET / HTTP/1.1\r\nHost: x\r\n\r\n", b"\x00" * 64, b"\x16\x03\x01\x00"):
+            with socket.create_connection(("127.0.0.1", port), timeout=5) as probe:
+                probe.settimeout(3)
+                probe.sendall(payload)
+                try:
+                    reply = probe.recv(4096)
+                except (TimeoutError, OSError):
+                    reply = b""
+            assert b"xray" not in reply.lower()
+            assert b"vless" not in reply.lower()
+
+        # 3. After all that, a legitimate client still gets through.
+        with XrayProbeSession(xray_bin, [endpoint], user) as session:
+            assert session.probe("ok", timeout=10).ok
