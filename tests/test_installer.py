@@ -69,7 +69,8 @@ def test_bash_accepts_the_syntax() -> None:
 def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> None:
     assert "--role) ROLE=" in text
     section = text[text.index("install_brain() {") : text.index("detect_ssh_port() {")]
-    assert "install -m 0600" in section  # brain.env is created owner-only
+    assert "install -m 0640" in section  # readable by the service group, not world
+    assert 'chown root:"$SERVICE_USER"' in section
     assert "brain.env" in section
     assert "ufw" not in section  # the brain opens no ports
 
