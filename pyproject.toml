@@ -21,8 +21,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
-markers = ["e2e: needs a real Xray binary and internet access (loopback server + client)"]
+addopts = "-q -m 'not load'"
+markers = [
+    "e2e: needs a real Xray binary and internet access (loopback server + client)",
+    "load: slow local load tests, run explicitly with `pytest -m load`",
+]
 
 [tool.ruff]
 line-length = 100

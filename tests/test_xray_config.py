@@ -52,7 +52,7 @@ def test_privacy_and_abuse_defaults(server: ServerSettings, users: list[User]) -
     assert set(PRIVATE_NETWORKS) == set(block_ip["ip"])
     assert any(rule.get("protocol") == ["bittorrent"] for rule in rules)
     direct = next(o for o in config["outbounds"] if o["tag"] == "direct")
-    assert direct["settings"]["domainStrategy"] == "UseIPv4"
+    assert direct["streamSettings"]["sockopt"]["domainStrategy"] == "UseIPv4"
 
 
 def test_stats_api_is_loopback_only_and_routed_first(

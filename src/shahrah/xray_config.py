@@ -126,8 +126,10 @@ def render_server_config(
             {
                 "tag": "direct",
                 "protocol": "freedom",
-                "settings": {"domainStrategy": "UseIPv4"},
-                "streamSettings": {"sockopt": _sockopt(server.tuning)},
+                # domainStrategy lives in sockopt since Xray 26 (the freedom setting is deprecated)
+                "streamSettings": {
+                    "sockopt": {**_sockopt(server.tuning), "domainStrategy": "UseIPv4"}
+                },
             },
             {"tag": "block", "protocol": "blackhole"},
         ],

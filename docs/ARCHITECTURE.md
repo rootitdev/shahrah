@@ -103,3 +103,20 @@ proxy that terminates TLS:
 * Restrict the origin port in the firewall to your CDN's address ranges. Shahrah ships no CDN
   range lists because they change; the operator applies them.
 * No CDN account, domain or API credential is stored anywhere in the repo.
+
+## Local load evidence (`pytest -m load`)
+
+Run on one developer machine with a real Xray REALITY node, a client and a local echo target:
+
+* 300 concurrent tunnels all completed an echo exchange (setup p95 about 5.6 s on that machine,
+  dominated by REALITY borrowing a real handshake from the cover site for every new connection;
+  pick a cover site that is fast from the *server*, `xray` has no cache for it).
+* With `conn_idle_s=30` every idle tunnel was closed by the node within the limit, the target saw
+  0 open connections, and the clients observed the closure (no half-open "dead" sockets).
+* The node kept serving a fresh wave afterwards.
+* A user cannot reach loopback/LAN services behind the node: Shahrah's own routing rule blocks
+  private ranges and Xray 26 additionally refuses them inside the freedom outbound.
+
+What this does **not** prove: behaviour with 1000-3000 *real* users on the Iranian internet,
+vanished peers on lossy mobile links (TCP keepalive is configured but cannot be simulated on
+loopback), CPU/memory at that scale, or throughput. Those need the server phase.
