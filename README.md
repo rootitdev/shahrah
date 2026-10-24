@@ -73,3 +73,8 @@ end-to-end test (`-m e2e`) additionally needs internet access.
 - No hardcoded hosts, IPs, domains or secrets anywhere in the repository.
 - The server never logs which sites users visit.
 - Pure logic is separated from I/O so behaviour is unit-testable.
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE). PasarGuard (AGPL-3.0) is used only through its REST API and is not bundled or linked.
+
