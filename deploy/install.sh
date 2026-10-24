@@ -27,6 +27,7 @@ TARGET="www.cloudflare.com"
 PROFILE="reality-vision"
 PORT="443"
 SSH_PORT=""
+EXTRA_LISTENERS=()
 FIREWALL=1
 WORK_DIR=""
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
@@ -44,6 +45,9 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --target DOMAIN   TLS 1.3 site REALITY imitates (default: www.cloudflare.com)
   --profile NAME    reality-vision (default) or reality-xhttp
   --port PORT       listen port (default 443; other ports weaken allowlist survival)
+  --extra-listener PORT:PROFILE
+                    additional listening port, repeatable (e.g. 80:reality-xhttp)
+  --multi-port      preset: also listen on 80 and 53 with reality-xhttp (443 + 80 + 53)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
   -h, --help        show this help
@@ -58,6 +62,8 @@ parse_args() {
       --target) TARGET="${2:?--target needs a value}"; shift 2 ;;
       --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
       --port) PORT="${2:?--port needs a value}"; shift 2 ;;
+      --extra-listener) EXTRA_LISTENERS+=("${2:?--extra-listener needs PORT:PROFILE}"); shift 2 ;;
+      --multi-port) EXTRA_LISTENERS+=("80:reality-xhttp" "53:reality-xhttp"); shift ;;
       --ssh-port) SSH_PORT="${2:?--ssh-port needs a value}"; shift 2 ;;
       --no-firewall) FIREWALL=0; shift ;;
       -h|--help) usage; exit 0 ;;
@@ -127,8 +133,9 @@ setup_user_and_dirs() {
 }
 
 init_node() {
-  local state="$CONF_DIR/state.json" extra=()
-  [[ "$PORT" == "443" ]] || extra+=(--allow-non-443)
+  local state="$CONF_DIR/state.json" extra=() spec
+  [[ "$PORT" == "443" || "$PORT" == "80" || "$PORT" == "53" ]] || extra+=(--allow-non-443)
+  for spec in "${EXTRA_LISTENERS[@]}"; do extra+=(--extra-listener "$spec"); done
   if [[ -f "$state" ]]; then
     log "keeping existing node state ($state)"
   else
@@ -143,7 +150,25 @@ init_node() {
     --config-out "$CONF_DIR/xray.json" --group "$SERVICE_USER"
 }
 
+free_dns_port() {
+  # Ubuntu/Debian run a local stub resolver on 127.0.0.53:53 which blocks binding port 53.
+  if ! shahrah --state "$CONF_DIR/state.json" listener list | awk '{print $1}' | grep -qx 53; then
+    return
+  fi
+  log "port 53 is used by a listener: disabling the systemd-resolved stub"
+  if systemctl is-active --quiet systemd-resolved; then
+    install -d /etc/systemd/resolved.conf.d
+    printf '[Resolve]\nDNSStubListener=no\n' > /etc/systemd/resolved.conf.d/90-shahrah.conf
+    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+    systemctl restart systemd-resolved
+  fi
+  if ss -ltnpH 'sport = :53' | grep -v '"xray"' | grep -q .; then
+    die "TCP port 53 is already used by another service; stop it or drop the 53 listener"
+  fi
+}
+
 install_service() {
+  free_dns_port
   log "installing systemd service ${SERVICE_NAME}"
   shahrah --state "$CONF_DIR/state.json" print systemd-unit \
     > "/etc/systemd/system/${SERVICE_NAME}.service"

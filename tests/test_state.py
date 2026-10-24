@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from shahrah.models import ConfigError, Profile
+from shahrah.models import ConfigError, Listener, Profile
 from shahrah.state import NodeState, load_state, save_state
 
 
@@ -84,3 +84,37 @@ def test_hand_edited_invalid_value_is_rejected(node: NodeState) -> None:
 def test_missing_file_has_actionable_message(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="shahrah init"):
         load_state(tmp_path / "missing.json")
+
+
+def test_extra_listeners_round_trip_and_become_prioritised_endpoints(
+    node: NodeState, tmp_path: Path
+) -> None:
+    node = node.with_listener(Listener(53, Profile.REALITY_XHTTP)).with_listener(
+        Listener(80, Profile.REALITY_XHTTP)
+    )
+    path = tmp_path / "state.json"
+    save_state(path, node)
+    loaded = load_state(path)
+    assert loaded == node
+    endpoints = loaded.endpoints()
+    assert [(e.name, e.priority) for e in endpoints] == [
+        ("main-443", 0),
+        ("main-53", 2),
+        ("main-80", 1),
+    ]
+    assert len({e.public_key for e in endpoints}) == 1
+
+
+def test_primary_listener_cannot_be_removed_and_unknown_port_is_an_error(node: NodeState) -> None:
+    with pytest.raises(ConfigError, match="primary"):
+        node.without_listener(443)
+    with pytest.raises(ConfigError, match="no extra listener"):
+        node.without_listener(80)
+    node = node.with_listener(Listener(80, Profile.REALITY_XHTTP))
+    assert node.without_listener(80).extra_listeners == ()
+
+
+def test_old_state_files_without_listeners_still_load(node: NodeState) -> None:
+    data = json.loads(node.to_json())
+    del data["listeners"]
+    assert NodeState.from_json(json.dumps(data)).extra_listeners == ()

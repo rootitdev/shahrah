@@ -17,7 +17,7 @@ from pathlib import Path
 from . import client_template, deploy, keys
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
-from .models import ConfigError, Profile, User
+from .models import ConfigError, Listener, Profile, User
 from .panel import PanelClient, PanelError, sync
 from .prober import ProbeError, ProbeResult, XrayProbeSession
 from .roles import brain_role, sales_manager_role
@@ -40,7 +40,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--profile", choices=[p.value for p in Profile], default=Profile.REALITY_VISION
     )
     init.add_argument("--port", type=int, default=443)
-    init.add_argument("--allow-non-443", action="store_true")
+    init.add_argument("--allow-non-443", action="store_true", help="allow ports outside 443/80/53")
+    init.add_argument(
+        "--extra-listener",
+        action="append",
+        default=[],
+        metavar="PORT:PROFILE",
+        help="additional port, e.g. 80:reality-xhttp (repeatable)",
+    )
     init.add_argument("--force", action="store_true", help="overwrite an existing state file")
 
     apply = sub.add_parser("apply", help="render and validate the Xray server config")
@@ -57,7 +64,15 @@ def _build_parser() -> argparse.ArgumentParser:
     remove.add_argument("label")
     user_sub.add_parser("list")
 
-    link = sub.add_parser("link", help="print the vless:// link for a user")
+    listener = sub.add_parser("listener", help="manage extra listening ports")
+    listener_sub = listener.add_subparsers(dest="listener_command", required=True)
+    l_add = listener_sub.add_parser("add")
+    l_add.add_argument("spec", metavar="PORT:PROFILE")
+    l_remove = listener_sub.add_parser("remove")
+    l_remove.add_argument("port", type=int)
+    listener_sub.add_parser("list")
+
+    link = sub.add_parser("link", help="print the vless:// link(s) for a user")
     link.add_argument("label")
     link.add_argument("--name", default="main")
 
@@ -120,6 +135,17 @@ def _write_service_config(path: Path, text: str, group: str | None) -> None:
     if group:
         shutil.chown(path, group=group)
         path.chmod(0o640)
+
+
+def _parse_listener(spec: str) -> Listener:
+    port_text, _, profile_text = spec.partition(":")
+    try:
+        return Listener(int(port_text), Profile(profile_text))
+    except ValueError as exc:
+        choices = ", ".join(p.value for p in Profile)
+        raise ConfigError(
+            f"listener must look like PORT:PROFILE ({choices}); got {spec!r}"
+        ) from exc
 
 
 def _run_brain(args: argparse.Namespace) -> int:
@@ -222,6 +248,7 @@ def _run(args: argparse.Namespace) -> int:
             profile=Profile(args.profile),
             port=args.port,
             allow_non_443=args.allow_non_443,
+            extra_listeners=tuple(_parse_listener(spec) for spec in args.extra_listener),
         )
         save_state(state_path, state)
         out.write(f"node initialised: {state_path}\npublic key: {state.public_key}\n")
@@ -235,7 +262,7 @@ def _run(args: argparse.Namespace) -> int:
         elif args.what == "sysctl":
             out.write(deploy.sysctl_conf())
         else:
-            ports = [load_state(state_path).port]
+            ports = [item.port for item in load_state(state_path).server_settings().listeners()]
             out.write("\n".join(deploy.ufw_commands(ssh_port=args.ssh_port, public_ports=ports)))
             out.write("\n")
         return 0
@@ -270,12 +297,24 @@ def _run(args: argparse.Namespace) -> int:
                 out.write(f"{user.label} {user.uuid}\n")
         return 0
 
+    if args.command == "listener":
+        if args.listener_command == "add":
+            state = state.with_listener(_parse_listener(args.spec))
+            save_state(state_path, state)
+        elif args.listener_command == "remove":
+            state = state.without_listener(args.port)
+            save_state(state_path, state)
+        for item in state.server_settings().listeners():
+            out.write(f"{item.port} {item.profile}\n")
+        return 0
+
     user_obj = state.find_user(args.label)
-    endpoint = state.endpoint(args.name)
+    endpoints = state.endpoints(args.name)
     if args.command == "link":
-        out.write(vless_link(endpoint, user_obj) + "\n")
+        for endpoint in sorted(endpoints, key=lambda e: e.priority):
+            out.write(vless_link(endpoint, user_obj) + "\n")
     elif args.command == "sub":
-        out.write(build_subscription([endpoint], user_obj) + "\n")
+        out.write(build_subscription(endpoints, user_obj) + "\n")
     return 0
 
 

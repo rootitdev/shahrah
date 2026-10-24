@@ -16,8 +16,10 @@ from typing import Any
 
 from . import keys
 from .models import (
+    CRISIS_PORTS,
     ConfigError,
     Endpoint,
+    Listener,
     Profile,
     RealityServer,
     ServerSettings,
@@ -44,6 +46,7 @@ class NodeState:
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False
     users: tuple[User, ...] = field(default_factory=tuple)
+    extra_listeners: tuple[Listener, ...] = ()
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
@@ -65,6 +68,7 @@ class NodeState:
         allow_non_443: bool = False,
         xhttp_path: str = "/",
         xhttp_mode: str = "stream-one",
+        extra_listeners: tuple[Listener, ...] = (),
     ) -> NodeState:
         private, public = keys.generate_keypair()
         return cls(
@@ -78,6 +82,7 @@ class NodeState:
             allow_non_443=allow_non_443,
             xhttp_path=xhttp_path,
             xhttp_mode=xhttp_mode,
+            extra_listeners=extra_listeners,
         )
 
     def server_settings(self, *, stats_api_port: int | None = None) -> ServerSettings:
@@ -94,20 +99,46 @@ class NodeState:
             xhttp_mode=self.xhttp_mode,
             allow_non_443=self.allow_non_443,
             stats_api_port=stats_api_port,
+            extra_listeners=self.extra_listeners,
         )
 
+    def endpoints(self, prefix: str = "main") -> list[Endpoint]:
+        """One client endpoint per listener, named ``<prefix>-<port>``.
+
+        Priority follows the crisis order 443 -> 80 -> 53, so ready-made clients try the most
+        mainstream port first and keep the others as fall-overs.
+        """
+        crisis_rank = {port: rank for rank, port in enumerate(CRISIS_PORTS)}
+        return [
+            Endpoint(
+                name=f"{prefix}-{listener.port}",
+                host=self.public_host,
+                port=listener.port,
+                profile=listener.profile,
+                public_key=self.public_key,
+                short_id=self.short_ids[0],
+                sni=self.target_host,
+                xhttp_path=listener.xhttp_path,
+                xhttp_mode=listener.xhttp_mode,
+                priority=crisis_rank.get(listener.port, len(CRISIS_PORTS)),
+            )
+            for listener in self.server_settings().listeners()
+        ]
+
     def endpoint(self, name: str = "main") -> Endpoint:
-        return Endpoint(
-            name=name,
-            host=self.public_host,
-            port=self.port,
-            profile=self.profile,
-            public_key=self.public_key,
-            short_id=self.short_ids[0],
-            sni=self.target_host,
-            xhttp_path=self.xhttp_path,
-            xhttp_mode=self.xhttp_mode,
-        )
+        """The primary listener's endpoint (kept for single-port callers)."""
+        return replace(self.endpoints()[0], name=name)
+
+    def with_listener(self, listener: Listener) -> NodeState:
+        return replace(self, extra_listeners=(*self.extra_listeners, listener))
+
+    def without_listener(self, port: int) -> NodeState:
+        if port == self.port:
+            raise ConfigError("the primary listener cannot be removed")
+        remaining = tuple(item for item in self.extra_listeners if item.port != port)
+        if len(remaining) == len(self.extra_listeners):
+            raise ConfigError(f"no extra listener on port {port}")
+        return replace(self, extra_listeners=remaining)
 
     def with_user(self, label: str) -> tuple[NodeState, User]:
         if any(user.label == label for user in self.users):
@@ -142,6 +173,15 @@ class NodeState:
             "xhttp_path": self.xhttp_path,
             "xhttp_mode": self.xhttp_mode,
             "users": [{"uuid": user.uuid, "label": user.label} for user in self.users],
+            "listeners": [
+                {
+                    "port": item.port,
+                    "profile": str(item.profile),
+                    "xhttp_path": item.xhttp_path,
+                    "xhttp_mode": item.xhttp_mode,
+                }
+                for item in self.extra_listeners
+            ],
         }
         return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
@@ -164,6 +204,10 @@ class NodeState:
                 xhttp_path=data["xhttp_path"],
                 xhttp_mode=data["xhttp_mode"],
                 users=tuple(User(u["uuid"], u["label"]) for u in data["users"]),
+                extra_listeners=tuple(
+                    Listener(i["port"], Profile(i["profile"]), i["xhttp_path"], i["xhttp_mode"])
+                    for i in data.get("listeners", [])
+                ),
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             if isinstance(exc, ConfigError):

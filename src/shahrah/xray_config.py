@@ -16,7 +16,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from .models import Profile, ServerSettings, Tuning, User
+from .models import Listener, Profile, ServerSettings, Tuning, User
 
 PRIVATE_NETWORKS: tuple[str, ...] = (
     "0.0.0.0/8",
@@ -50,10 +50,10 @@ def _sockopt(tuning: Tuning) -> dict[str, Any]:
     }
 
 
-def _stream_settings(server: ServerSettings) -> dict[str, Any]:
+def _stream_settings(server: ServerSettings, listener: Listener) -> dict[str, Any]:
     reality = server.reality
     stream: dict[str, Any] = {
-        "network": "raw" if server.profile is Profile.REALITY_VISION else "xhttp",
+        "network": "raw" if listener.profile is Profile.REALITY_VISION else "xhttp",
         "security": "reality",
         "realitySettings": {
             "show": False,
@@ -67,8 +67,8 @@ def _stream_settings(server: ServerSettings) -> dict[str, Any]:
     }
     tuning = server.tuning
     stream["sockopt"] = _sockopt(tuning)
-    if server.profile is Profile.REALITY_XHTTP:
-        stream["xhttpSettings"] = {"path": server.xhttp_path, "mode": server.xhttp_mode}
+    if listener.profile is Profile.REALITY_XHTTP:
+        stream["xhttpSettings"] = {"path": listener.xhttp_path, "mode": listener.xhttp_mode}
     return stream
 
 
@@ -88,23 +88,23 @@ def render_server_config(
 
     inbounds: list[dict[str, Any]] = [
         {
-            "tag": "in-main",
+            "tag": "in-main" if index == 0 else f"in-{listener.port}",
             "listen": server.listen,
-            "port": server.port,
+            "port": listener.port,
             "protocol": "vless",
             "settings": {
-                "clients": [_client(user, server.profile) for user in users],
+                "clients": [_client(user, listener.profile) for user in users],
                 "decryption": "none",
             },
-            "streamSettings": _stream_settings(server),
+            "streamSettings": _stream_settings(server, listener),
             "sniffing": {
                 "enabled": True,
                 "destOverride": ["http", "tls", "quic"],
                 "routeOnly": True,
             },
         }
+        for index, listener in enumerate(server.listeners())
     ]
-
     rules: list[dict[str, Any]] = []
     config: dict[str, Any] = {
         "log": {"loglevel": log_level, "access": "none"},

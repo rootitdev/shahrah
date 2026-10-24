@@ -7,7 +7,15 @@ from pathlib import Path
 
 import pytest
 
-from shahrah.models import ConfigError, Profile, RealityServer, ServerSettings, Tuning, User
+from shahrah.models import (
+    ConfigError,
+    Listener,
+    Profile,
+    RealityServer,
+    ServerSettings,
+    Tuning,
+    User,
+)
 from shahrah.xray_config import PRIVATE_NETWORKS, VISION_FLOW, dumps, render_server_config
 
 
@@ -151,3 +159,41 @@ def test_tuning_overrides_flow_into_the_config(server: ServerSettings, users: li
 def test_invalid_tuning_is_rejected(kwargs: dict[str, object]) -> None:
     with pytest.raises(ConfigError):
         Tuning(**kwargs)  # type: ignore[arg-type]
+
+
+def test_every_listener_gets_its_own_inbound_with_the_right_transport(
+    reality: RealityServer, users: list[User]
+) -> None:
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=reality,
+        extra_listeners=(Listener(80, Profile.REALITY_XHTTP), Listener(53, Profile.REALITY_XHTTP)),
+    )
+    inbounds = render_server_config(server, users)["inbounds"]
+    assert [(i["tag"], i["port"]) for i in inbounds] == [
+        ("in-main", 443),
+        ("in-80", 80),
+        ("in-53", 53),
+    ]
+    networks = [i["streamSettings"]["network"] for i in inbounds]
+    assert networks == ["raw", "xhttp", "xhttp"]
+    flows = [i["settings"]["clients"][0].get("flow") for i in inbounds]
+    assert flows == ["xtls-rprx-vision", None, None]  # only Vision carries a flow
+    keys = {i["streamSettings"]["realitySettings"]["privateKey"] for i in inbounds}
+    assert len(keys) == 1  # one REALITY identity for all ports
+
+
+def test_real_xray_accepts_443_80_and_53_together(
+    reality: RealityServer, users: list[User], xray_bin: str, real_private_key: str, tmp_path: Path
+) -> None:
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=replace(reality, private_key=real_private_key),
+        extra_listeners=(Listener(80, Profile.REALITY_XHTTP), Listener(53, Profile.REALITY_XHTTP)),
+    )
+    path = tmp_path / "multi.json"
+    path.write_text(dumps(render_server_config(server, users)), encoding="utf-8")
+    result = subprocess.run(
+        [xray_bin, "run", "-test", "-c", str(path)], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

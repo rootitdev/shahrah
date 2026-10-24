@@ -154,9 +154,31 @@ class Tuning:
                 raise ConfigError(f"{name} must be an integer in {low}..{high}: {value!r}")
 
 
+# Ports that stay reachable when Iran drops to an allowlist-style shutdown (TCP only).
+CRISIS_PORTS = (443, 80, 53)
+
+
+@dataclass(frozen=True, slots=True)
+class Listener:
+    """One public inbound: a port plus how it carries traffic."""
+
+    port: int
+    profile: Profile
+    xhttp_path: str = "/"
+    xhttp_mode: str = "stream-one"
+
+    def __post_init__(self) -> None:
+        validate_port(self.port)
+        _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+
+
 @dataclass(frozen=True, slots=True)
 class ServerSettings:
-    """One Xray server: which profile it serves and on which port."""
+    """One Xray server: a primary listener plus optional extra ones on other ports.
+
+    All listeners share the same REALITY identity. Offering 443 together with 80 and 53 lets
+    a client fall over to whichever port the censor still lets through.
+    """
 
     profile: Profile
     reality: RealityServer
@@ -164,22 +186,32 @@ class ServerSettings:
     port: int = 443
     xhttp_path: str = "/"
     xhttp_mode: str = "stream-one"
-    allow_non_443: bool = False
+    allow_non_443: bool = False  # permit ports outside CRISIS_PORTS (443/80/53)
     stats_api_port: int | None = None  # loopback-only gRPC stats API for usage accounting
     tuning: Tuning = field(default_factory=Tuning)
+    extra_listeners: tuple[Listener, ...] = ()
 
     def __post_init__(self) -> None:
         validate_port(self.port)
-        if self.port != 443 and not self.allow_non_443:
-            raise ConfigError(
-                "only TCP/443 reliably survives allowlist shutdowns; "
-                "set allow_non_443=True to override"
-            )
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        listeners = self.listeners()
+        ports = [listener.port for listener in listeners]
+        if len(set(ports)) != len(ports):
+            raise ConfigError(f"listener ports must be unique: {ports}")
+        for port in ports:
+            if port not in CRISIS_PORTS and not self.allow_non_443:
+                raise ConfigError(
+                    f"port {port} is not one of {CRISIS_PORTS}, the TCP ports that survive "
+                    "allowlist shutdowns; set allow_non_443=True to override"
+                )
         if self.stats_api_port is not None:
             validate_port(self.stats_api_port, "stats api port")
-            if self.stats_api_port == self.port:
-                raise ConfigError("stats api port must differ from the public port")
+            if self.stats_api_port in ports:
+                raise ConfigError("stats api port must differ from the public ports")
+
+    def listeners(self) -> tuple[Listener, ...]:
+        primary = Listener(self.port, self.profile, self.xhttp_path, self.xhttp_mode)
+        return (primary, *self.extra_listeners)
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -230,3 +231,49 @@ def test_cli_uploads_the_leak_resistant_template(
         assert content["routing"]["domainStrategy"] == "AsIs"
     finally:
         fake.close()
+
+
+def test_multi_port_node_end_to_end_through_the_cli(
+    state_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = run(
+        state_file,
+        "init",
+        "--host",
+        "vpn.example.org",
+        "--target",
+        "www.cloudflare.com",
+        "--extra-listener",
+        "80:reality-xhttp",
+        "--extra-listener",
+        "53:reality-xhttp",
+    )
+    assert code == 0
+    run(state_file, "user", "add", "alice")
+    capsys.readouterr()
+
+    assert run(state_file, "link", "alice") == 0
+    links = capsys.readouterr().out.strip().splitlines()
+    assert [urlsplit(link).port for link in links] == [443, 80, 53]  # crisis order
+    assert "type=xhttp" in links[1]
+    assert "flow=xtls-rprx-vision" in links[0]
+
+    assert run(state_file, "sub", "alice") == 0
+    body = base64.b64decode(capsys.readouterr().out.strip()).decode().splitlines()
+    assert [urlsplit(link).port for link in body] == [443, 80, 53]
+
+    assert run(state_file, "print", "ufw") == 0
+    firewall = capsys.readouterr().out
+    assert all(f"ufw allow {port}/tcp" in firewall for port in (443, 80, 53))
+
+
+def test_listener_commands_and_bad_spec(
+    state_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(state_file)
+    assert run(state_file, "listener", "add", "80:reality-xhttp") == 0
+    assert "80 reality-xhttp" in capsys.readouterr().out
+    assert run(state_file, "listener", "remove", "80") == 0
+    assert run(state_file, "listener", "add", "eighty:reality-xhttp") == 2
+    assert "PORT:PROFILE" in capsys.readouterr().err
+    assert run(state_file, "listener", "add", "9999:reality-xhttp") == 2  # not a crisis port

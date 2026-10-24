@@ -7,6 +7,7 @@ import pytest
 from shahrah.models import (
     ConfigError,
     Endpoint,
+    Listener,
     Profile,
     RealityServer,
     ServerSettings,
@@ -88,3 +89,43 @@ def test_endpoint_validation(endpoint: Endpoint) -> None:
     for bad in ({"host": "bad host"}, {"port": 70000}, {"short_id": "zz"}, {"name": " "}):
         with pytest.raises(ConfigError):
             replace(endpoint, **bad)
+
+
+def test_crisis_ports_80_and_53_are_allowed_without_override(reality: RealityServer) -> None:
+    for port in (443, 80, 53):
+        ServerSettings(profile=Profile.REALITY_VISION, reality=reality, port=port)
+
+
+def test_multiple_listeners_share_one_server(reality: RealityServer) -> None:
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=reality,
+        extra_listeners=(Listener(80, Profile.REALITY_XHTTP), Listener(53, Profile.REALITY_XHTTP)),
+    )
+    assert [(item.port, item.profile) for item in server.listeners()] == [
+        (443, Profile.REALITY_VISION),
+        (80, Profile.REALITY_XHTTP),
+        (53, Profile.REALITY_XHTTP),
+    ]
+
+
+def test_listener_ports_must_be_unique_and_allowed(reality: RealityServer) -> None:
+    with pytest.raises(ConfigError, match="unique"):
+        ServerSettings(
+            profile=Profile.REALITY_VISION,
+            reality=reality,
+            extra_listeners=(Listener(443, Profile.REALITY_XHTTP),),
+        )
+    with pytest.raises(ConfigError, match="survive"):
+        ServerSettings(
+            profile=Profile.REALITY_VISION,
+            reality=reality,
+            extra_listeners=(Listener(8443, Profile.REALITY_XHTTP),),
+        )
+    with pytest.raises(ConfigError, match="stats api port"):
+        ServerSettings(
+            profile=Profile.REALITY_VISION,
+            reality=reality,
+            extra_listeners=(Listener(80, Profile.REALITY_XHTTP),),
+            stats_api_port=80,
+        )

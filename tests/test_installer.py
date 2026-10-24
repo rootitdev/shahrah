@@ -35,7 +35,7 @@ def test_binary_is_verified_before_install(text: str) -> None:
 
 def test_script_contains_no_private_infrastructure(text: str) -> None:
     ips = re.findall(r"\b\d{1,3}(?:\.\d{1,3}){3}\b", text)
-    assert ips == []
+    assert [ip for ip in ips if not ip.startswith("127.")] == []  # loopback is not infrastructure
     assert "rootitdev" not in text
 
 
@@ -72,3 +72,16 @@ def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> N
     assert "install -m 0600" in section  # brain.env is created owner-only
     assert "brain.env" in section
     assert "ufw" not in section  # the brain opens no ports
+
+
+def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str) -> None:
+    assert "--multi-port) EXTRA_LISTENERS+=(" in text
+    assert "--extra-listener) EXTRA_LISTENERS+=(" in text
+    assert 'extra+=(--extra-listener "$spec")' in text
+    body = text[text.index("main() {") :]
+    assert "install_service" in body
+    # the stub resolver is disabled inside install_service, before the service is (re)started
+    service = text[text.index("install_service() {") : text.index("detect_ssh_port() {")]
+    assert service.index("free_dns_port") < service.index("systemctl restart")
+    assert "DNSStubListener=no" in text
+    assert "grep -v '\"xray\"'" in text  # re-running must not mistake our own Xray for a conflict

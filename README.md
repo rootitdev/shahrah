@@ -16,6 +16,9 @@ Debian 12+ or Ubuntu 24.04+ (Python >= 3.11), as root:
 ```bash
 git clone <this repository> shahrah && cd shahrah
 sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com
+
+# resilient variant: 443 (Vision) + 80 and 53 (XHTTP), the TCP ports that survive allowlist shutdowns
+sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com --multi-port
 ```
 
 The installer downloads a **pinned, checksum-verified** Xray, generates the REALITY keys on the

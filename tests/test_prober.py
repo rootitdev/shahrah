@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from shahrah.models import Endpoint, Profile, RealityServer, ServerSettings, User
+from shahrah.models import Endpoint, Listener, Profile, RealityServer, ServerSettings, User
 from shahrah.oracle import Probe
 from shahrah.prober import (
     ProbeError,
@@ -216,3 +216,38 @@ def test_real_tunnel_probe_end_to_end(
     assert results["vision-ok"].latency_ms is not None
     assert not results["wrong-short-id"].ok
     assert not results["nothing-listening"].ok
+
+
+@pytest.mark.e2e
+def test_one_xray_process_serves_vision_and_xhttp_on_two_ports(
+    xray_bin: str, real_keypair: tuple[str, str], tmp_path: Path
+) -> None:
+    """The multi-port node (443/80/53 in production) works as one process on loopback."""
+    if not _internet_available():
+        pytest.skip("needs internet access (REALITY borrows a real TLS handshake)")
+    private, public = real_keypair
+    user = User.create("shahrah-probe")
+    vision_port, xhttp_port = _free_port(), _free_port()
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=RealityServer(target_host=E2E_TARGET, private_key=private, short_ids=("ab12",)),
+        listen="127.0.0.1",
+        port=vision_port,
+        allow_non_443=True,
+        extra_listeners=(Listener(xhttp_port, Profile.REALITY_XHTTP),),
+    )
+    endpoints = [
+        Endpoint(
+            "vision", "127.0.0.1", vision_port, Profile.REALITY_VISION, public, "ab12", E2E_TARGET
+        ),
+        Endpoint(
+            "xhttp", "127.0.0.1", xhttp_port, Profile.REALITY_XHTTP, public, "ab12", E2E_TARGET
+        ),
+    ]
+    with (
+        run_server(xray_bin, server, [user], tmp_path),
+        XrayProbeSession(xray_bin, endpoints, user) as session,
+    ):
+        results = {r.endpoint: r for r in session.probe_all(timeout=10)}
+    assert results["vision"].ok, results["vision"].detail
+    assert results["xhttp"].ok, results["xhttp"].detail
