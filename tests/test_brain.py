@@ -171,6 +171,7 @@ def _config_json(endpoint: Endpoint, probe_user: User) -> dict[str, object]:
         "remarks": {endpoint.name: "Exit A"},
         "interval_s": 20,
         "oracle": {"fail_streak": 4},
+        "burn": {"burn_after": 7},
     }
 
 
@@ -178,6 +179,7 @@ def test_config_loads_from_json(endpoint: Endpoint, users: list[User]) -> None:
     loaded = BrainConfig.from_json(json.dumps(_config_json(endpoint, users[0])))
     assert loaded.endpoints[0].profile is Profile.REALITY_VISION
     assert loaded.oracle.fail_streak == 4
+    assert loaded.burn.burn_after == 7
     assert loaded.interval_s == 20
 
 

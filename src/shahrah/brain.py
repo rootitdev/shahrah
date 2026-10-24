@@ -14,6 +14,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import burn as burnmod
+from .burn import BurnConfig, BurnState
 from .models import ConfigError, Endpoint, Profile, User
 from .oracle import Decision, Mode, OracleConfig, OracleState, PathSpec, Probe, step
 from .panel import PanelError, SyncPlan
@@ -23,6 +25,9 @@ log = logging.getLogger("shahrah.brain")
 
 ProbeRound = Callable[[], Sequence[ProbeResult]]
 PanelSync = Callable[[Sequence[str]], SyncPlan]
+ControlSource = Callable[[], Mapping[str, bool]]
+BurnHook = Callable[[Sequence[str]], None]
+ReportSink = Callable[[Sequence[ProbeResult]], None]
 Clock = Callable[[], float]
 
 
@@ -35,6 +40,7 @@ class BrainConfig:
     remarks: Mapping[str, str]  # endpoint name -> panel host remark
     interval_s: float = 30.0
     oracle: OracleConfig = field(default_factory=OracleConfig)
+    burn: BurnConfig = field(default_factory=BurnConfig)
 
     def __post_init__(self) -> None:
         if not self.endpoints:
@@ -64,12 +70,14 @@ class BrainConfig:
             )
             user = User(data["probe_user"]["uuid"], data["probe_user"]["label"])
             oracle = OracleConfig(**data.get("oracle", {}))
+            burn = BurnConfig(**data.get("burn", {}))
             return cls(
                 endpoints=endpoints,
                 probe_user=user,
                 remarks=dict(data.get("remarks", {})),
                 interval_s=float(data.get("interval_s", 30.0)),
                 oracle=oracle,
+                burn=burn,
             )
         except (KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ConfigError):
@@ -85,18 +93,29 @@ class Brain:
         panel_sync: PanelSync | None = None,
         *,
         clock: Clock = time.monotonic,
+        control_source: ControlSource | None = None,
+        on_burn: BurnHook | None = None,
+        report_sink: ReportSink | None = None,
     ) -> None:
         self._config = config
         self._specs = config.specs()
         self._probe_round = probe_round
         self._panel_sync = panel_sync
         self._clock = clock
+        self._control_source = control_source
+        self._on_burn = on_burn
+        self._report_sink = report_sink
         self._state = OracleState()
+        self._burn_state = BurnState()
         self._synced_ranking: tuple[str, ...] | None = None
 
     @property
     def state(self) -> OracleState:
         return self._state
+
+    @property
+    def burned(self) -> tuple[str, ...]:
+        return self._burn_state.burned
 
     def cycle(self) -> Decision | None:
         """Run one probe -> decide -> sync round. Returns ``None`` if probing itself failed."""
@@ -118,8 +137,46 @@ class Brain:
         if decision.state.mode is not previous_mode:
             log.warning("mode %s -> %s", previous_mode, decision.state.mode)
 
+        self._publish_report(results)
+        self._detect_burn(results)
         self._sync_panel(decision.ranking)
         return decision
+
+    def _publish_report(self, results: Sequence[ProbeResult]) -> None:
+        if self._report_sink is None:
+            return
+        try:
+            self._report_sink(results)
+        except OSError as exc:
+            log.error("cannot publish vantage report: %s", exc)
+
+    def _detect_burn(self, results: Sequence[ProbeResult]) -> None:
+        """Compare this vantage with the control one; hand burned endpoints to the operator."""
+        if self._control_source is None:
+            return
+        outcome = burnmod.step(
+            self._config.burn,
+            self._burn_state,
+            {r.endpoint: r.ok for r in results},
+            self._control_source(),
+        )
+        self._burn_state = outcome.state
+        if outcome.network_wide:
+            log.warning("every path is blocked from the field but not from control: network-wide")
+        for name in outcome.recovered:
+            log.info("path %s is reachable again, burn cleared", name)
+        if not outcome.newly_burned:
+            return
+        log.warning(
+            "paths burned (blocked in the field, fine from control): %s", outcome.newly_burned
+        )
+        if self._on_burn is None:
+            return
+        try:
+            self._on_burn(outcome.newly_burned)
+        except Exception:
+            # The hook is operator code. Whatever it does, the loop must keep running.
+            log.exception("on-burn hook failed")
 
     def _sync_panel(self, ranking: tuple[str, ...]) -> None:
         if self._panel_sync is None or ranking == self._synced_ranking:

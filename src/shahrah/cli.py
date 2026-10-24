@@ -11,10 +11,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import client_template, deploy, keys
+from . import client_template, deploy, keys, vantage
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
@@ -85,6 +85,19 @@ def _build_parser() -> argparse.ArgumentParser:
     brain.add_argument("--xray-bin", default="xray")
     brain.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
     brain.add_argument("--once", action="store_true", help="run a single cycle and exit")
+    brain.add_argument(
+        "--control-report",
+        help="path or https URL of the control-vantage report; enables burn detection",
+    )
+    brain.add_argument("--control-max-age", type=float, default=300.0, help="seconds")
+    brain.add_argument(
+        "--on-burn",
+        type=Path,
+        help="executable run (no shell) with the burned endpoint names as arguments",
+    )
+    brain.add_argument(
+        "--write-report", type=Path, help="publish this vantage's results (control side)"
+    )
     brain.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
 
     panel = sub.add_parser("panel", help="one-time setup of a PasarGuard panel (owner key)")
@@ -148,6 +161,20 @@ def _parse_listener(spec: str) -> Listener:
         ) from exc
 
 
+def _burn_hook(executable: Path) -> Callable[[Sequence[str]], None]:
+    """Build the on-burn hook. The operator script receives endpoint names only (validated
+    labels, never shell-interpreted) and is bounded by a timeout."""
+    if not executable.is_file() or not os.access(executable, os.X_OK):
+        raise ConfigError(f"--on-burn is not an executable file: {executable}")
+
+    def hook(names: Sequence[str]) -> None:
+        subprocess.run(  # noqa: S603 - fixed operator-chosen executable, no shell
+            [str(executable), *names], check=False, timeout=60, stdin=subprocess.DEVNULL
+        )
+
+    return hook
+
+
 def _run_brain(args: argparse.Namespace) -> int:
     """Wire prober, oracle and panel together. The panel API key is read from the environment
     only: command-line arguments are visible to every local user through the process list."""
@@ -178,7 +205,27 @@ def _run_brain(args: argparse.Namespace) -> int:
             session = None  # a fresh Xray process is started on the next cycle
             raise ProbeError(str(exc)) from exc
 
-    brain = Brain(config, probe_round, panel_sync)
+    on_burn = _burn_hook(args.on_burn) if args.on_burn else None
+    control_source = (
+        vantage.make_control_source(args.control_report, max_age_s=args.control_max_age)
+        if args.control_report
+        else None
+    )
+    report_sink = None
+    if args.write_report:
+        report_path = args.write_report
+
+        def report_sink(results: Sequence[ProbeResult]) -> None:
+            vantage.write_report(report_path, vantage.build_report(results))
+
+    brain = Brain(
+        config,
+        probe_round,
+        panel_sync,
+        control_source=control_source,
+        on_burn=on_burn,
+        report_sink=report_sink,
+    )
     try:
         if args.once:
             decision = brain.cycle()

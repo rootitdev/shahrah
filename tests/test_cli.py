@@ -277,3 +277,11 @@ def test_listener_commands_and_bad_spec(
     assert run(state_file, "listener", "add", "eighty:reality-xhttp") == 2
     assert "PORT:PROFILE" in capsys.readouterr().err
     assert run(state_file, "listener", "add", "9999:reality-xhttp") == 2  # not a crisis port
+
+
+def test_on_burn_hook_must_be_an_existing_executable(tmp_path: Path) -> None:
+    from shahrah.cli import _burn_hook
+    from shahrah.models import ConfigError
+
+    with pytest.raises(ConfigError, match="executable"):
+        _burn_hook(tmp_path / "nope.sh")

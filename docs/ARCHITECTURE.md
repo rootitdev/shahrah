@@ -55,3 +55,31 @@ do not flap.
 3. Management layer: root admin, sales managers and customers on top of PasarGuard.
 4. CDN-fronted XHTTP profile (needs a TLS-terminating reverse proxy).
 5. Leak-proof dedicated clients (kill-switch, DNS/IPv6/WebRTC leak protection).
+
+## Burn detection and rotation
+
+A server whose IP or SNI is blocked inside Iran still works from everywhere else, so one vantage
+point cannot tell *burned* from *down*. `shahrah.burn` compares two vantages:
+
+| field (inside) | control (outside) | verdict |
+| --- | --- | --- |
+| ok | any | healthy |
+| fail | ok | **blocked** (burn candidate) |
+| fail | fail | down (repair, do not rotate) |
+| fail | unknown | unknown (never declared blind) |
+
+Guards: `burn_after` consecutive blocked cycles are needed, and if *every* endpoint is blocked
+at once it is reported as network-wide (shutdown / allowlist mode) instead of burning anything.
+
+Wiring (no third-party service is required):
+
+1. On a free network run `shahrah brain --config brain.json --write-report /var/www/report.json`
+   and publish that file over HTTPS (any static host).
+2. On the field vantage run `shahrah brain ... --control-report https://host/report.json
+   --on-burn /etc/shahrah/on-burn`.
+3. `on-burn` is an operator executable called (no shell) with the burned endpoint names as
+   arguments. It is where provider-specific rotation lives: allocate a new IP, re-point DNS,
+   add the endpoint to the brain config. Shahrah deliberately ships no cloud-provider code.
+
+Stale (> `--control-max-age`) or unreachable control reports mean "unknown", which never
+produces a burn.
