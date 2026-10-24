@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import client_template, deploy, keys, provision, vantage
+from . import client_template, deploy, keys, provision, sni_scout, vantage
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
@@ -133,6 +133,25 @@ def _build_parser() -> argparse.ArgumentParser:
     show = sub.add_parser("print", help="print host files generated for the installer")
     show.add_argument("what", choices=["systemd-unit", "brain-unit", "ufw", "sysctl"])
     show.add_argument("--ssh-port", type=int, default=22)
+
+    rotate = sub.add_parser(
+        "rotate-reality",
+        help="replace the REALITY private key (breaks existing client links until re-issued)",
+    )
+    rotate.add_argument(
+        "--keep-short-id",
+        action="store_true",
+        help="reuse the current short id (default: generate a new one)",
+    )
+
+    scout = sub.add_parser(
+        "sni-scout",
+        help="rank candidate TLS sites for use as a REALITY target (run on the exit)",
+    )
+    scout.add_argument("hosts", nargs="+", help="domain names to probe")
+    scout.add_argument("--timeout", type=float, default=5.0)
+    scout.add_argument("--allow-risky", action="store_true")
+    scout.add_argument("--json", action="store_true", help="machine-readable output")
     return parser
 
 
@@ -389,8 +408,52 @@ def _run(args: argparse.Namespace) -> int:
         return _run_brain(args)
     if args.command == "panel":
         return _run_panel(args)
+    if args.command == "sni-scout":
+        results = sni_scout.scout(args.hosts, timeout_s=args.timeout, allow_risky=args.allow_risky)
+        if args.json:
+            out.write(
+                json.dumps(
+                    [
+                        {
+                            "host": r.host,
+                            "ok": r.ok,
+                            "latency_ms": r.latency_ms,
+                            "tls_version": r.tls_version,
+                            "alpn": r.alpn,
+                            "detail": r.detail,
+                        }
+                        for r in results
+                    ],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for result in results:
+                mark = "ok " if result.ok else "NO "
+                latency = f"{result.latency_ms:.0f}ms" if result.latency_ms is not None else "-"
+                out.write(
+                    f"{mark} {result.host:40} {latency:>8}  "
+                    f"{result.tls_version or '-':8}  {result.alpn or '-':8}  {result.detail}\n"
+                )
+            ranking = sni_scout.ranking(results)
+            out.write(f"ranking: {' '.join(ranking) if ranking else '(none)'}\n")
+        return 0 if any(r.ok for r in results) else 1
 
     state = load_state(state_path)
+
+    if args.command == "rotate-reality":
+        old_pub = state.public_key
+        state = state.rotate_reality(new_short_id=not args.keep_short_id)
+        save_state(state_path, state)
+        out.write(
+            f"REALITY key rotated\nold public key: {old_pub}\n"
+            f"new public key: {state.public_key}\n"
+            f"short id: {state.short_ids[0]}\n"
+            "next: shahrah apply && systemctl restart shahrah-xray "
+            "then re-issue client links / update brain.json\n"
+        )
+        return 0
 
     if args.command == "apply":
         if not state.users:

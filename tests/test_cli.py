@@ -285,3 +285,20 @@ def test_on_burn_hook_must_be_an_existing_executable(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="executable"):
         _burn_hook(tmp_path / "nope.sh")
+
+
+def test_rotate_reality_changes_keys_and_keeps_users(
+    state_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(state_file)
+    assert run(state_file, "user", "add", "alice") == 0
+    before = json.loads(state_file.read_text(encoding="utf-8"))
+    capsys.readouterr()
+    assert run(state_file, "rotate-reality") == 0
+    out = capsys.readouterr().out
+    after = json.loads(state_file.read_text(encoding="utf-8"))
+    assert after["private_key"] != before["private_key"]
+    assert after["public_key"] != before["public_key"]
+    assert after["short_ids"] != before["short_ids"]
+    assert after["users"] == before["users"]
+    assert "new public key:" in out and after["private_key"] not in out

@@ -160,6 +160,16 @@ class NodeState:
             raise ConfigError(f"no extra listener on port {port}")
         return replace(self, extra_listeners=remaining)
 
+    def rotate_reality(self, *, new_short_id: bool = True) -> NodeState:
+        """Replace the REALITY private key (and usually the short id).
+
+        Existing client links break until they are re-issued. Call ``apply`` and restart Xray
+        after saving. Used when a private key may have leaked.
+        """
+        private, public = keys.generate_keypair()
+        short_ids = (keys.generate_short_id(),) if new_short_id else self.short_ids
+        return replace(self, private_key=private, public_key=public, short_ids=short_ids)
+
     def with_user(self, label: str) -> tuple[NodeState, User]:
         if any(user.label == label for user in self.users):
             raise ConfigError(f"user {label!r} already exists")
