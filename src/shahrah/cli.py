@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import client_template, deploy, keys, vantage
+from . import client_template, deploy, keys, provision, vantage
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
@@ -116,6 +116,13 @@ def _build_parser() -> argparse.ArgumentParser:
     tmpl.add_argument(
         "--make-default", action="store_true", help="apply to ALL users (explicit choice)"
     )
+    prov = panel_sub.add_parser(
+        "provision",
+        help="create the core config and one host per listener from this node's state",
+    )
+    prov.add_argument("--core-name", default="shahrah")
+    prov.add_argument("--prefix", default="main", help="endpoint/host remark prefix")
+    prov.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
     sales = panel_sub.add_parser("sales-role", help="create a least-privilege sales role")
     sales.add_argument("--name", required=True)
     sales.add_argument("--template-id", type=int, nargs="+", required=True)
@@ -271,12 +278,47 @@ def _run_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _provision_summary(
+    args: argparse.Namespace,
+    plans: list[provision.HostPlan],
+    core_created: bool | None,
+    hosts: dict[str, bool],
+) -> dict[str, object]:
+    """Secret-free report; ``brain_remarks`` goes straight into the brain config."""
+    return {
+        "core": {
+            "name": args.core_name,
+            "state": "planned" if core_created is None else "created" if core_created else "exists",
+        },
+        "hosts": {
+            plan.remark: "planned"
+            if core_created is None
+            else "created"
+            if hosts[plan.remark]
+            else "exists"
+            for plan in plans
+        },
+        "brain_remarks": provision.remarks(plans),
+    }
+
+
 def _run_panel(args: argparse.Namespace) -> int:
+    if args.panel_command == "provision" and args.dry_run:
+        # A dry run needs no URL or credentials and never talks to the panel.
+        plans = provision.host_plans(load_state(args.state), prefix=args.prefix)
+        sys.stdout.write(json.dumps(_provision_summary(args, plans, None, {}), indent=2) + "\n")
+        return 0
     if not args.panel_url:
         raise ConfigError("--panel-url (or SHAHRAH_PANEL_URL) is required")
     client = PanelClient(args.panel_url, os.environ.get("SHAHRAH_PANEL_API_KEY", ""))
     try:
-        if args.panel_command == "bootstrap":
+        if args.panel_command == "provision":
+            state = load_state(args.state)
+            plans = provision.host_plans(state, prefix=args.prefix)
+            core_created = client.ensure_core(provision.core_payload(args.core_name, state))
+            hosts = {plan.remark: client.ensure_host(plan.payload) for plan in plans}
+            result = _provision_summary(args, plans, core_created, hosts)
+        elif args.panel_command == "bootstrap":
             probe_uuid = args.probe_uuid or keys.generate_uuid()
             user = User(probe_uuid, args.probe_username)  # validates both values
             role_created = client.ensure_role(brain_role())

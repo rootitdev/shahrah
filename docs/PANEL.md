@@ -95,3 +95,22 @@ limits so vanished mobile clients do not leave dead connections behind.
 What a template **cannot** do: a browser's WebRTC bypasses a SOCKS/HTTP proxy and can reveal the real
 address in *proxy mode*. Use the client's TUN/VPN mode or disable WebRTC in the browser. A dedicated
 client with a kill-switch is a later phase; until then this remains a documented limitation.
+## Provisioning a panel from a node description
+
+In panel-managed mode PasarGuard owns users, quotas and the running Xray; Shahrah only says *what to
+run* and *what clients connect to*, both derived from the same state file so they cannot drift:
+
+    shahrah init --host vpn.example.org --target www.cloudflare.com --extra-listener 80:reality-xhttp
+    shahrah panel provision --dry-run                 # prints the plan, needs no credentials
+    SHAHRAH_PANEL_API_KEY=... shahrah panel provision --panel-url https://panel.example.org
+
+* A **core** (Xray config, clients left empty for the panel) is created once. An existing core with
+  the same name is never modified, because replacing a live core restarts Xray for every user.
+* One **host** per listener is created (REALITY hosts keep the inbound's security; CDN hosts
+  override it with TLS or none and point at the CDN edge). Existing hosts are never edited.
+* The command prints `brain_remarks`: paste it into `brain.json` so the brain steers exactly
+  these hosts.
+* The core config contains the REALITY private key (the panel must hold it to run Xray); host
+  payloads contain no private material.
+* Payloads are checked against PasarGuard's real pydantic models by an opt-in test
+  (`PASARGUARD_SRC`), which already caught one invalid enum value during development.

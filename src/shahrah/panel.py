@@ -186,6 +186,26 @@ class PanelClient:
         self._request("POST", "/api/user", probe_user_payload(username, vless_uuid, group_ids))
         return True
 
+    def ensure_core(self, payload: Mapping[str, Any]) -> bool:
+        """Create a core config unless one with that name exists. Returns True if created.
+
+        An existing core is never modified: replacing a running core would restart Xray for
+        every connected user.
+        """
+        data = self._request("GET", "/api/cores")
+        cores = data.get("cores", []) if isinstance(data, dict) else []
+        if any(core.get("name") == payload["name"] for core in cores):
+            return False
+        self._request("POST", "/api/core", dict(payload))
+        return True
+
+    def ensure_host(self, payload: Mapping[str, Any]) -> bool:
+        """Create a host unless one with that remark exists. Returns True if created."""
+        if any(host.get("remark") == payload["remark"] for host in self.list_hosts()):
+            return False
+        self._request("POST", "/api/host/", dict(payload))
+        return True
+
     def list_hosts(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/api/hosts")
         if not isinstance(data, list):

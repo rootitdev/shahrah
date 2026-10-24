@@ -36,6 +36,11 @@ _API_TAG = "api"
 _API_INBOUND_TAG = "api-in"
 
 
+def inbound_tag(index: int, listener: Listener) -> str:
+    """Stable tag of the ``index``-th listener (also the panel host's ``inbound_tag``)."""
+    return "in-main" if index == 0 else f"in-{listener.port}"
+
+
 def _client(user: User, profile: Profile) -> dict[str, Any]:
     client: dict[str, Any] = {"id": user.uuid, "email": user.label}
     if profile is Profile.REALITY_VISION:
@@ -96,7 +101,7 @@ def render_server_config(
 
     inbounds: list[dict[str, Any]] = [
         {
-            "tag": "in-main" if index == 0 else f"in-{listener.port}",
+            "tag": inbound_tag(index, listener),
             "listen": server.listen,
             "port": listener.port,
             "protocol": "vless",
