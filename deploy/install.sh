@@ -218,18 +218,27 @@ install_service() {
 
 install_brain() {
   log "installing the brain service"
-  [[ -f "$CONF_DIR/brain.env" ]] || install -m 0600 -o root -g root /dev/null "$CONF_DIR/brain.env"
+  [[ -f "$CONF_DIR/brain.env" ]] || install -m 0640 -o root -g "$SERVICE_USER" /dev/null "$CONF_DIR/brain.env"
   if [[ ! -s "$CONF_DIR/brain.env" ]]; then
     printf "# Panel owner access is NOT needed here: use the least-privilege brain key.\nSHAHRAH_PANEL_URL=\nSHAHRAH_PANEL_API_KEY=\n" > "$CONF_DIR/brain.env"
   fi
+  # The service runs as $SERVICE_USER; root-only 0600 files cause PermissionError at start.
+  chown root:"$SERVICE_USER" "$CONF_DIR" "$CONF_DIR/brain.env"
+  chmod 0750 "$CONF_DIR"
+  chmod 0640 "$CONF_DIR/brain.env"
+  [[ -f "$CONF_DIR/brain.json" ]] && chown root:"$SERVICE_USER" "$CONF_DIR/brain.json" && chmod 0640 "$CONF_DIR/brain.json"
   shahrah print brain-unit > "/etc/systemd/system/shahrah-brain.service"
   systemctl daemon-reload
   systemctl enable shahrah-brain >/dev/null
   if [[ -f "$CONF_DIR/brain.json" ]]; then
     systemctl restart shahrah-brain
+    sleep 2
+    systemctl is-active --quiet shahrah-brain \
+      || { journalctl -u shahrah-brain -n 20 --no-pager >&2; die "shahrah-brain failed to start"; }
     log "shahrah-brain started"
   else
     log "now create $CONF_DIR/brain.json (see docs/PANEL.md), fill $CONF_DIR/brain.env, then:"
+    log "  chown root:${SERVICE_USER} $CONF_DIR/brain.json && chmod 640 $CONF_DIR/brain.json"
     log "  systemctl start shahrah-brain"
   fi
 }

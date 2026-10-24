@@ -133,3 +133,11 @@ other endpoint but stay hidden from clients (their panel host stays disabled) un
 
 When a burn is forgiven the spare is demoted again. `--on-burn` remains available for
 operators who also want to provision new spares automatically.
+
+## Field note: TCP/53 from Iran
+
+On at least one measured Iran→foreign path (2026-10), outbound TCP to the exit's port 53 was
+filtered while 80 and 443 stayed open. `--multi-port` still installs a 53 listener for crisis
+scenarios and other networks, but operators should verify `timeout 3 bash -c 'echo >/dev/tcp/EXIT/53'`
+from an Iran vantage before advertising that port to clients. Shahrah's crisis ranking already
+prefers 443 then 80.

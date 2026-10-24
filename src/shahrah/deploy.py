@@ -66,7 +66,11 @@ def brain_unit(
     env_file: PurePosixPath = DEFAULT_CONFIG_DIR / "brain.env",
     user: str = SERVICE_USER,
 ) -> str:
-    """The brain only makes outbound connections: no capabilities, no listening sockets."""
+    """The brain only makes outbound connections: no capabilities, no listening sockets.
+
+    ``brain.json`` / ``brain.env`` must be readable by ``{user}`` (mode ``640``, group
+    ``{user}``). The installer sets that ownership; hand-written files often forget it.
+    """
     return f"""[Unit]
 Description=Shahrah brain (tunnel health prober and panel steering)
 After=network-online.target
