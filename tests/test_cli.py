@@ -302,3 +302,11 @@ def test_rotate_reality_changes_keys_and_keeps_users(
     assert after["short_ids"] != before["short_ids"]
     assert after["users"] == before["users"]
     assert "new public key:" in out and after["private_key"] not in out
+
+
+def test_retarget_updates_sni(state_file: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    init(state_file)
+    assert run(state_file, "retarget", "www.samsung.com") == 0
+    assert "www.samsung.com" in capsys.readouterr().out
+    assert json.loads(state_file.read_text(encoding="utf-8"))["target_host"] == "www.samsung.com"
+    assert run(state_file, "retarget", "www.apple.com") == 2

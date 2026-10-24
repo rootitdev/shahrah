@@ -17,6 +17,7 @@ from typing import Any
 from . import keys
 from .models import (
     CRISIS_PORTS,
+    RISKY_TARGET_SUFFIXES,
     ConfigError,
     Endpoint,
     Listener,
@@ -24,6 +25,7 @@ from .models import (
     RealityServer,
     ServerSettings,
     User,
+    is_ip,
     validate_host,
 )
 
@@ -159,6 +161,18 @@ class NodeState:
         if len(remaining) == len(self.extra_listeners):
             raise ConfigError(f"no extra listener on port {port}")
         return replace(self, extra_listeners=remaining)
+
+    def with_target(self, target_host: str) -> NodeState:
+        """Point REALITY at a different TLS 1.3 site (the public SNI clients dial)."""
+        validate_host(target_host, "REALITY target host")
+        if is_ip(target_host):
+            raise ConfigError("REALITY target must be a domain name, not an IP address")
+        if target_host.endswith(RISKY_TARGET_SUFFIXES):
+            raise ConfigError(
+                f"REALITY target {target_host!r} is known to get server IPs blocked; "
+                "pick another TLS 1.3 site"
+            )
+        return replace(self, target_host=target_host)
 
     def rotate_reality(self, *, new_short_id: bool = True) -> NodeState:
         """Replace the REALITY private key (and usually the short id).

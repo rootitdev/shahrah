@@ -21,7 +21,9 @@ IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
 # A 43-char base64url token is the shape of an X25519 key; only the obvious dummy may appear.
 KEY_SHAPE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")
 PRIVATE_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
-FORBIDDEN_WORDS = ("vpn-infra", "settle-web", "sni-watch", "ig-mult-web")
+# Private infra repo name must never appear. Product module names (SNI watch, ig-mult,
+# settle-web) are allowed once they are part of the unified ops/panel design.
+FORBIDDEN_WORDS = ("vpn-infra",)
 
 
 def files() -> Iterator[Path]:

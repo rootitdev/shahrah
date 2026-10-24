@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import client_template, deploy, keys, provision, sni_scout, vantage
+from . import client_template, deploy, keys, ops, provision, sni_scout, vantage
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
@@ -152,6 +152,31 @@ def _build_parser() -> argparse.ArgumentParser:
     scout.add_argument("--timeout", type=float, default=5.0)
     scout.add_argument("--allow-risky", action="store_true")
     scout.add_argument("--json", action="store_true", help="machine-readable output")
+
+    retarget = sub.add_parser(
+        "retarget", help="change the REALITY target / SNI (then apply + restart)"
+    )
+    retarget.add_argument("target", help="TLS 1.3 domain the server will imitate")
+
+    ops_cmd = sub.add_parser(
+        "ops", help="unified ops console (SNI scout today; watch/ig-mult placeholders)"
+    )
+    ops_cmd.add_argument("--listen", default="127.0.0.1:8787", help="host:port (default loopback)")
+    ops_cmd.add_argument(
+        "--token",
+        default=os.environ.get("SHAHRAH_OPS_TOKEN", ""),
+        help="shared secret (or SHAHRAH_OPS_TOKEN); required",
+    )
+    ops_cmd.add_argument(
+        "--brain-status",
+        type=Path,
+        help="optional JSON file with a brain describe() snapshot",
+    )
+    ops_cmd.add_argument(
+        "--print-token",
+        action="store_true",
+        help="generate a token, print it, and exit (for first-time setup)",
+    )
     return parser
 
 
@@ -408,6 +433,23 @@ def _run(args: argparse.Namespace) -> int:
         return _run_brain(args)
     if args.command == "panel":
         return _run_panel(args)
+    if args.command == "ops":
+        if args.print_token:
+            out.write(ops.generate_token() + "\n")
+            return 0
+        if not args.token:
+            raise ConfigError("pass --token or set SHAHRAH_OPS_TOKEN (or --print-token)")
+        host, _, port_text = args.listen.partition(":")
+        config = ops.OpsConfig(
+            token=args.token,
+            host=host or "127.0.0.1",
+            port=int(port_text or "8787"),
+            brain_status_path=str(args.brain_status) if args.brain_status else None,
+        )
+        out.write(f"ops listening on http://{config.host}:{config.port}/ (token required)\n")
+        ops.serve(config)
+        return 0
+
     if args.command == "sni-scout":
         results = sni_scout.scout(args.hosts, timeout_s=args.timeout, allow_risky=args.allow_risky)
         if args.json:
@@ -452,6 +494,16 @@ def _run(args: argparse.Namespace) -> int:
             f"short id: {state.short_ids[0]}\n"
             "next: shahrah apply && systemctl restart shahrah-xray "
             "then re-issue client links / update brain.json\n"
+        )
+        return 0
+
+    if args.command == "retarget":
+        state = state.with_target(args.target)
+        save_state(state_path, state)
+        out.write(
+            f"REALITY target -> {state.target_host}\n"
+            "next: shahrah apply && systemctl restart shahrah-xray "
+            "and update brain.json / client links (sni=)\n"
         )
         return 0
 
