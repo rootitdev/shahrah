@@ -46,7 +46,7 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --profile NAME    reality-vision (default) or reality-xhttp
   --port PORT       listen port (default 443; other ports weaken allowlist survival)
   --extra-listener PORT:PROFILE
-                    additional listening port, repeatable (e.g. 80:reality-xhttp)
+                    additional listening port, repeatable (e.g. 80:reality-xhttp, or a CDN origin\n                    8080:cdn-xhttp:cdn.example.com[:PATH[:http]])
   --multi-port      preset: also listen on 80 and 53 with reality-xhttp (443 + 80 + 53)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
@@ -135,7 +135,11 @@ setup_user_and_dirs() {
 init_node() {
   local state="$CONF_DIR/state.json" extra=() spec
   [[ "$PORT" == "443" || "$PORT" == "80" || "$PORT" == "53" ]] || extra+=(--allow-non-443)
-  for spec in "${EXTRA_LISTENERS[@]}"; do extra+=(--extra-listener "$spec"); done
+  for spec in "${EXTRA_LISTENERS[@]}"; do
+    extra+=(--extra-listener "$spec")
+    # A CDN origin port (e.g. 8080) is outside 443/80/53 by design.
+    case "${spec%%:*}" in 443|80|53) ;; *) [[ " ${extra[*]} " == *" --allow-non-443 "* ]] || extra+=(--allow-non-443) ;; esac
+  done
   if [[ -f "$state" ]]; then
     log "keeping existing node state ($state)"
   else

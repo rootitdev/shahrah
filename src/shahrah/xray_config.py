@@ -51,6 +51,14 @@ def _sockopt(tuning: Tuning) -> dict[str, Any]:
 
 
 def _stream_settings(server: ServerSettings, listener: Listener) -> dict[str, Any]:
+    if listener.profile is Profile.CDN_XHTTP:
+        # TLS is terminated by the CDN / reverse proxy in front; this inbound is plain XHTTP.
+        return {
+            "network": "xhttp",
+            "security": "none",
+            "xhttpSettings": {"path": listener.xhttp_path, "mode": listener.xhttp_mode},
+            "sockopt": _sockopt(server.tuning),
+        }
     reality = server.reality
     stream: dict[str, Any] = {
         "network": "raw" if listener.profile is Profile.REALITY_VISION else "xhttp",

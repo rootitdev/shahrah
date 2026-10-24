@@ -20,8 +20,27 @@ def _format_host(host: str) -> str:
     return f"[{host}]" if is_ip(host) and ":" in host else host
 
 
+def _cdn_link(endpoint: Endpoint, user: User) -> str:
+    query: list[tuple[str, str]] = [("encryption", "none")]
+    if endpoint.tls:
+        query += [
+            ("security", "tls"),
+            ("sni", endpoint.sni),
+            ("fp", endpoint.fingerprint),
+            ("alpn", "h2,http/1.1"),
+        ]
+    else:
+        query.append(("security", "none"))
+    query += [("type", "xhttp"), ("path", endpoint.xhttp_path), ("mode", endpoint.xhttp_mode)]
+    authority = f"{user.uuid}@{_format_host(endpoint.host)}:{endpoint.port}"
+    params = urlencode(query, quote_via=quote)
+    return f"vless://{authority}?{params}#{quote(endpoint.name, safe='')}"
+
+
 def vless_link(endpoint: Endpoint, user: User) -> str:
     """Return a ``vless://`` share link for ``user`` on ``endpoint``."""
+    if endpoint.profile is Profile.CDN_XHTTP:
+        return _cdn_link(endpoint, user)
     query: list[tuple[str, str]] = [
         ("encryption", "none"),
         ("security", "reality"),

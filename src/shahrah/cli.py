@@ -7,6 +7,7 @@ import functools
 import json
 import logging
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -37,7 +38,9 @@ def _build_parser() -> argparse.ArgumentParser:
     init.add_argument("--host", required=True, help="public domain or IP clients connect to")
     init.add_argument("--target", required=True, help="TLS 1.3 site REALITY imitates")
     init.add_argument(
-        "--profile", choices=[p.value for p in Profile], default=Profile.REALITY_VISION
+        "--profile",
+        choices=[p.value for p in Profile if p is not Profile.CDN_XHTTP],
+        default=Profile.REALITY_VISION,
     )
     init.add_argument("--port", type=int, default=443)
     init.add_argument("--allow-non-443", action="store_true", help="allow ports outside 443/80/53")
@@ -46,7 +49,8 @@ def _build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="PORT:PROFILE",
-        help="additional port, e.g. 80:reality-xhttp (repeatable)",
+        help="additional port, e.g. 80:reality-xhttp or "
+        "8080:cdn-xhttp:cdn.example.com[:PATH[:http]] (repeatable)",
     )
     init.add_argument("--force", action="store_true", help="overwrite an existing state file")
 
@@ -151,10 +155,35 @@ def _write_service_config(path: Path, text: str, group: str | None) -> None:
 
 
 def _parse_listener(spec: str) -> Listener:
-    port_text, _, profile_text = spec.partition(":")
+    """Parse ``PORT:PROFILE`` or, for a CDN listener, ``PORT:cdn-xhttp:HOST[:PATH[:http]]``.
+
+    An empty PATH generates a random unguessable one; a trailing ``http`` means clients reach
+    the edge without TLS (port 80).
+    """
+    port_text, _, rest = spec.partition(":")
+    profile_text, _, cdn_text = rest.partition(":")
     try:
-        return Listener(int(port_text), Profile(profile_text))
+        profile = Profile(profile_text)
+        if profile is not Profile.CDN_XHTTP:
+            if cdn_text:
+                raise ConfigError(f"unexpected extra fields for {profile_text}: {cdn_text!r}")
+            return Listener(int(port_text), profile)
+        host, _, tail = cdn_text.partition(":")
+        path_text, _, scheme = tail.partition(":")
+        if scheme not in ("", "http", "https"):
+            raise ConfigError(f"edge scheme must be http or https: {scheme!r}")
+        path = f"/{path_text.lstrip('/')}" if path_text else f"/{secrets.token_urlsafe(12)}"
+        return Listener(
+            int(port_text),
+            profile,
+            xhttp_path=path,
+            xhttp_mode="packet-up",
+            cdn_host=host,
+            edge_tls=scheme != "http",
+        )
     except ValueError as exc:
+        if isinstance(exc, ConfigError):
+            raise
         choices = ", ".join(p.value for p in Profile)
         raise ConfigError(
             f"listener must look like PORT:PROFILE ({choices}); got {spec!r}"

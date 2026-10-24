@@ -84,7 +84,7 @@ def test_output_is_deterministic_json(server: ServerSettings, users: list[User])
     json.loads(text)
 
 
-@pytest.mark.parametrize("profile", list(Profile))
+@pytest.mark.parametrize("profile", [Profile.REALITY_VISION, Profile.REALITY_XHTTP])
 @pytest.mark.parametrize("with_stats", [True, False])
 def test_real_xray_accepts_generated_config(
     profile: Profile,

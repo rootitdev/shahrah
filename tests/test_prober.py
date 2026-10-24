@@ -299,3 +299,60 @@ def test_active_probes_see_the_real_target_site_and_cannot_break_the_server(
         # 3. After all that, a legitimate client still gets through.
         with XrayProbeSession(xray_bin, [endpoint], user) as session:
             assert session.probe("ok", timeout=10).ok
+
+
+@pytest.mark.e2e
+def test_cdn_xhttp_listener_carries_a_real_tunnel(
+    xray_bin: str, real_keypair: tuple[str, str], tmp_path: Path
+) -> None:
+    """The plain-XHTTP origin used behind a CDN works end to end (no TLS on loopback)."""
+    if not _internet_available():
+        pytest.skip("needs internet access (the probe fetches through the tunnel)")
+    private, _ = real_keypair
+    user = User.create("shahrah-probe")
+    reality_port, cdn_port = _free_port(), _free_port()
+    path = "/s3cret-path-123"
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=RealityServer(target_host=E2E_TARGET, private_key=private, short_ids=("ab12",)),
+        listen="127.0.0.1",
+        port=reality_port,
+        allow_non_443=True,
+        extra_listeners=(
+            Listener(
+                cdn_port,
+                Profile.CDN_XHTTP,
+                xhttp_path=path,
+                xhttp_mode="packet-up",
+                cdn_host="cdn.example.com",
+                edge_tls=False,
+            ),
+        ),
+    )
+    endpoints = [
+        Endpoint(
+            "cdn-ok",
+            "127.0.0.1",
+            cdn_port,
+            Profile.CDN_XHTTP,
+            tls=False,
+            xhttp_path=path,
+            xhttp_mode="packet-up",
+        ),
+        Endpoint(
+            "cdn-wrong-path",
+            "127.0.0.1",
+            cdn_port,
+            Profile.CDN_XHTTP,
+            tls=False,
+            xhttp_path="/another-path-999",
+            xhttp_mode="packet-up",
+        ),
+    ]
+    with (
+        run_server(xray_bin, server, [user], tmp_path),
+        XrayProbeSession(xray_bin, endpoints, user) as session,
+    ):
+        results = {r.endpoint: r for r in session.probe_all(timeout=10)}
+    assert results["cdn-ok"].ok, results["cdn-ok"].detail
+    assert not results["cdn-wrong-path"].ok  # the secret path is the only gate on plain HTTP

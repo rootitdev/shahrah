@@ -24,8 +24,32 @@ def outbound_tag(index: int) -> str:
     return f"probe-out-{index}"
 
 
+def _cdn_stream(endpoint: Endpoint) -> dict[str, Any]:
+    stream: dict[str, Any] = {
+        "network": "xhttp",
+        "security": "tls" if endpoint.tls else "none",
+        "xhttpSettings": {"path": endpoint.xhttp_path, "mode": endpoint.xhttp_mode},
+    }
+    if endpoint.tls:
+        stream["tlsSettings"] = {
+            "serverName": endpoint.sni,
+            "fingerprint": endpoint.fingerprint,
+            "alpn": ["h2", "http/1.1"],
+        }
+    return stream
+
+
 def _outbound(endpoint: Endpoint, user: User, index: int) -> dict[str, Any]:
     vless_user: dict[str, Any] = {"id": user.uuid, "encryption": "none"}
+    if endpoint.profile is Profile.CDN_XHTTP:
+        return {
+            "tag": outbound_tag(index),
+            "protocol": "vless",
+            "settings": {
+                "vnext": [{"address": endpoint.host, "port": endpoint.port, "users": [vless_user]}]
+            },
+            "streamSettings": _cdn_stream(endpoint),
+        }
     stream: dict[str, Any] = {
         "security": "reality",
         "realitySettings": {

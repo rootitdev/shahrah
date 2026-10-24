@@ -22,9 +22,16 @@ class Profile(StrEnum):
 
     REALITY_VISION = "reality-vision"  # VLESS + REALITY + XTLS-Vision over raw TCP
     REALITY_XHTTP = "reality-xhttp"  # VLESS + REALITY over XHTTP
+    # VLESS over plain XHTTP behind a CDN / TLS reverse proxy that terminates TLS: the crisis
+    # layer, reachable through a CDN edge when direct server IPs are blocked.
+    CDN_XHTTP = "cdn-xhttp"
 
 
 XHTTP_MODES = frozenset({"auto", "packet-up", "stream-up", "stream-one"})
+# CDNs buffer or cut long single-request streams, so stream-one is refused behind a CDN.
+CDN_XHTTP_MODES = frozenset({"auto", "packet-up", "stream-up"})
+# Plain HTTP between the CDN and the origin is only protected by an unguessable path.
+MIN_CDN_PATH_LENGTH = 9
 
 # Borrowing an Apple/iCloud handshake target gets server IPs blocked quickly
 # (also warned about by Xray itself), so it is refused by default.
@@ -160,16 +167,38 @@ CRISIS_PORTS = (443, 80, 53)
 
 @dataclass(frozen=True, slots=True)
 class Listener:
-    """One public inbound: a port plus how it carries traffic."""
+    """One public inbound: a port plus how it carries traffic.
+
+    For ``CDN_XHTTP`` the listener speaks plain XHTTP (no TLS of its own); ``cdn_host`` is the
+    domain clients dial (the CDN edge) and ``edge_tls`` says whether clients use TLS to it.
+    """
 
     port: int
     profile: Profile
     xhttp_path: str = "/"
     xhttp_mode: str = "stream-one"
+    cdn_host: str = ""
+    edge_tls: bool = True
 
     def __post_init__(self) -> None:
         validate_port(self.port)
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is Profile.CDN_XHTTP:
+            if not self.cdn_host or is_ip(self.cdn_host):
+                raise ConfigError("a cdn-xhttp listener needs cdn_host set to a domain name")
+            validate_host(self.cdn_host, "cdn host")
+            if self.xhttp_mode not in CDN_XHTTP_MODES:
+                raise ConfigError(
+                    f"xhttp mode behind a CDN must be one of {sorted(CDN_XHTTP_MODES)}: "
+                    f"{self.xhttp_mode!r}"
+                )
+            if len(self.xhttp_path) < MIN_CDN_PATH_LENGTH:
+                raise ConfigError(
+                    "a cdn-xhttp path must be unguessable (at least "
+                    f"{MIN_CDN_PATH_LENGTH} characters): the origin speaks plain HTTP"
+                )
+        elif self.cdn_host:
+            raise ConfigError("cdn_host is only valid for cdn-xhttp listeners")
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +223,8 @@ class ServerSettings:
     def __post_init__(self) -> None:
         validate_port(self.port)
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is Profile.CDN_XHTTP:
+            raise ConfigError("the primary listener must be a REALITY profile")
         listeners = self.listeners()
         ports = [listener.port for listener in listeners]
         if len(set(ports)) != len(ports):
@@ -243,9 +274,10 @@ class Endpoint:
     host: str
     port: int
     profile: Profile
-    public_key: str
-    short_id: str
-    sni: str
+    public_key: str = ""  # REALITY profiles only
+    short_id: str = ""  # REALITY profiles only
+    sni: str = ""  # REALITY: handshake target; CDN: TLS server name
+    tls: bool = True  # CDN profile only: does the client use TLS to the edge?
     fingerprint: str = "chrome"
     xhttp_path: str = "/"
     xhttp_mode: str = "stream-one"
@@ -257,7 +289,17 @@ class Endpoint:
             raise ConfigError("endpoint name must not be empty")
         validate_host(self.host, "endpoint host")
         validate_port(self.port, "endpoint port")
+        _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is Profile.CDN_XHTTP:
+            if self.public_key or self.short_id:
+                raise ConfigError("a cdn-xhttp endpoint has no REALITY key or short id")
+            if self.tls:
+                validate_host(self.sni, "endpoint sni")
+            elif self.sni:
+                raise ConfigError("sni must be empty when the edge is reached without TLS")
+            if self.xhttp_mode not in CDN_XHTTP_MODES:
+                raise ConfigError(f"xhttp mode behind a CDN must not be {self.xhttp_mode!r}")
+            return
         validate_x25519_key(self.public_key, "REALITY public key")
         validate_short_id(self.short_id)
         validate_host(self.sni, "endpoint sni")
-        _validate_xhttp(self.xhttp_path, self.xhttp_mode)

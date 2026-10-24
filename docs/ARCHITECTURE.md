@@ -83,3 +83,23 @@ Wiring (no third-party service is required):
 
 Stale (> `--control-max-age`) or unreachable control reports mean "unknown", which never
 produces a burn.
+
+## CDN-fronted XHTTP (crisis layer)
+
+When direct server IPs are blocked, a CDN edge often stays reachable. The `cdn-xhttp` listener
+is plain VLESS over XHTTP (`security: none`) meant to sit **behind** a CDN or a TLS reverse
+proxy that terminates TLS:
+
+    client --TLS--> CDN edge (443) --HTTP--> origin listener (e.g. :8080, plain XHTTP)
+
+* Added as an extra listener: `shahrah listener add 8080:cdn-xhttp:cdn.example.com`. The path is
+  generated (unguessable) unless given; `...:PATH:http` makes clients use plain HTTP to the edge.
+* The origin speaks plain HTTP, so the long random path is its only gate: paths shorter than 9
+  characters are rejected, and a wrong path is verified by an end-to-end test to be refused.
+* `packet-up`/`stream-up`/`auto` only; `stream-one` is refused behind a CDN because CDNs
+  buffer or cut single long streams.
+* The primary listener must stay REALITY. CDN endpoints are listed last and flagged
+  `lockdown_capable` (assumption to confirm in the field tests).
+* Restrict the origin port in the firewall to your CDN's address ranges. Shahrah ships no CDN
+  range lists because they change; the operator applies them.
+* No CDN account, domain or API credential is stored anywhere in the repo.

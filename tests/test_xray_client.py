@@ -52,7 +52,7 @@ def test_invalid_inputs(
         render_probe_config(eps, users[0], ports)
 
 
-@pytest.mark.parametrize("profile", list(Profile))
+@pytest.mark.parametrize("profile", [Profile.REALITY_VISION, Profile.REALITY_XHTTP])
 def test_real_xray_accepts_probe_config(
     profile: Profile,
     endpoint: Endpoint,
