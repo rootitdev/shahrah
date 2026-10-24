@@ -26,9 +26,10 @@ FORBIDDEN_WORDS = ("vpn-infra", "settle-web", "sni-watch", "ig-mult-web")
 
 def files() -> Iterator[Path]:
     for path in ROOT.rglob("*"):
-        if path.is_file() and not (set(path.relative_to(ROOT).parts) & SKIP_DIRS):
-            if path.suffix in TEXT_SUFFIXES or path.name in {"Dockerfile", ".gitignore"}:
-                yield path
+        skipped = set(path.relative_to(ROOT).parts) & SKIP_DIRS
+        textual = path.suffix in TEXT_SUFFIXES or path.name in {"Dockerfile", ".gitignore"}
+        if path.is_file() and textual and not skipped:
+            yield path
 
 
 def test_there_are_files_to_scan() -> None:
