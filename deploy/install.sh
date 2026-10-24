@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shahrah node installer.
 #
-# Supported: Debian 12+ / Ubuntu 24.04+ (needs Python >= 3.11), x86_64 or aarch64, run as root.
+# Supported: Debian 12+ / Ubuntu 22.04+ (needs Python >= 3.11), x86_64 or aarch64, run as root.
 # Idempotent: re-running upgrades the software and keeps the existing keys and users.
 #
 #   sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com
@@ -83,13 +83,43 @@ check_system() {
   command -v systemctl >/dev/null || die "systemd is required"
 }
 
+PYTHON_BIN="python3"
+
 install_packages() {
   log "installing system packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq python3 python3-venv unzip curl ca-certificates ufw >/dev/null
-  python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' \
-    || die "Python >= 3.11 is required (found $(python3 -V)); use Debian 12+ or Ubuntu 24.04+"
+  if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+    # Ubuntu 22.04 ships 3.10 as the default; 3.11 is available as a parallel package.
+    log "default $(python3 -V) is too old; installing python3.11"
+    apt-get install -y -qq python3.11 python3.11-venv >/dev/null \
+      || die "Python >= 3.11 is required and python3.11 could not be installed"
+    PYTHON_BIN="python3.11"
+  fi
+  "$PYTHON_BIN" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' \
+    || die "Python >= 3.11 is required (found $($PYTHON_BIN -V))"
+}
+
+free_public_ports() {
+  # A re-used VPS often still has nginx / an old Xray / a reverse proxy on 443/80/53.
+  local port listener
+  for port in "$PORT" "${EXTRA_LISTENERS[@]%%:*}"; do
+    [[ -n "$port" ]] || continue
+    while read -r listener; do
+      [[ -n "$listener" ]] || continue
+      case "$listener" in
+        *'"xray"'*|*"shahrah-xray"*) continue ;;
+      esac
+      log "port ${port} is busy ($listener); stopping common leftovers (nginx, xray, caddy)"
+      systemctl stop nginx xray caddy path-web 2>/dev/null || true
+      systemctl disable nginx xray caddy path-web 2>/dev/null || true
+      break
+    done < <(ss -ltnpH "sport = :${port}" 2>/dev/null || true)
+    if ss -ltnpH "sport = :${port}" 2>/dev/null | grep -vE '"xray"|shahrah-xray' | grep -q .; then
+      die "TCP port ${port} is still in use; stop the process and re-run the installer"
+    fi
+  done
 }
 
 install_xray() {
@@ -120,8 +150,8 @@ install_xray() {
 }
 
 install_app() {
-  log "installing shahrah from ${SRC_DIR}"
-  python3 -m venv "$APP_DIR/venv"
+  log "installing shahrah from ${SRC_DIR} (with ${PYTHON_BIN})"
+  "$PYTHON_BIN" -m venv "$APP_DIR/venv"
   "$APP_DIR/venv/bin/pip" install --quiet --upgrade "$SRC_DIR"
   ln -sf "$APP_DIR/venv/bin/shahrah" /usr/local/bin/shahrah
 }
@@ -234,6 +264,7 @@ main() {
     install_brain
     return
   fi
+  free_public_ports
   init_node
   install_service
   setup_firewall
