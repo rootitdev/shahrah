@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from shahrah.models import ConfigError
+from shahrah.panel import probe_user_payload
 from shahrah.roles import brain_role, sales_manager_role
 
 
@@ -64,6 +65,11 @@ def test_presets_are_accepted_by_the_real_panel_models() -> None:
     payloads = [sales_manager_role("sales", allowed_template_ids=[1, 2], max_users=5), brain_role()]
     for payload in payloads:
         model.model_validate(json.loads(json.dumps(payload)))  # type: ignore[attr-defined]
+    from app.models.user import UserCreate  # type: ignore[import-not-found]
+
+    UserCreate.model_validate(
+        probe_user_payload("shahrah_probe", "5c1b2e0a-6f1d-4f43-9a38-3a3c9a4f9b11", [1])
+    )
     typo = brain_role()
     typo["permissions"]["hosts"]["updat"] = True
     with pytest.raises(ValueError, match="updat"):

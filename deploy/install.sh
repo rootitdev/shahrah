@@ -21,6 +21,7 @@ SERVICE_USER="shahrah"
 SERVICE_NAME="shahrah-xray"
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+ROLE="node"
 HOST=""
 TARGET="www.cloudflare.com"
 PROFILE="reality-vision"
@@ -35,9 +36,11 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'EOF'
-Usage: install.sh --host HOST [options]
+Usage: install.sh --host HOST [options]      (VPN exit/entry node)
+       install.sh --role brain               (health prober + panel steering)
 
-  --host HOST       public domain or IP address clients connect to (required)
+  --role ROLE       node (default) or brain
+  --host HOST       public domain or IP address clients connect to (node only, required)
   --target DOMAIN   TLS 1.3 site REALITY imitates (default: www.cloudflare.com)
   --profile NAME    reality-vision (default) or reality-xhttp
   --port PORT       listen port (default 443; other ports weaken allowlist survival)
@@ -50,6 +53,7 @@ EOF
 parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --role) ROLE="${2:?--role needs a value}"; shift 2 ;;
       --host) HOST="${2:?--host needs a value}"; shift 2 ;;
       --target) TARGET="${2:?--target needs a value}"; shift 2 ;;
       --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
@@ -60,7 +64,11 @@ parse_args() {
       *) usage >&2; die "unknown option: $1" ;;
     esac
   done
-  [[ -n "$HOST" ]] || { usage >&2; die "--host is required"; }
+  case "$ROLE" in
+    node) [[ -n "$HOST" ]] || { usage >&2; die "--host is required for a node"; } ;;
+    brain) ;;
+    *) die "--role must be node or brain" ;;
+  esac
 }
 
 check_system() {
@@ -149,6 +157,24 @@ install_service() {
     || { journalctl -u "$SERVICE_NAME" -n 20 --no-pager >&2; die "$SERVICE_NAME failed to start"; }
 }
 
+install_brain() {
+  log "installing the brain service"
+  [[ -f "$CONF_DIR/brain.env" ]] || install -m 0600 -o root -g root /dev/null "$CONF_DIR/brain.env"
+  if [[ ! -s "$CONF_DIR/brain.env" ]]; then
+    printf "# Panel owner access is NOT needed here: use the least-privilege brain key.\nSHAHRAH_PANEL_URL=\nSHAHRAH_PANEL_API_KEY=\n" > "$CONF_DIR/brain.env"
+  fi
+  shahrah print brain-unit > "/etc/systemd/system/shahrah-brain.service"
+  systemctl daemon-reload
+  systemctl enable shahrah-brain >/dev/null
+  if [[ -f "$CONF_DIR/brain.json" ]]; then
+    systemctl restart shahrah-brain
+    log "shahrah-brain started"
+  else
+    log "now create $CONF_DIR/brain.json (see docs/PANEL.md), fill $CONF_DIR/brain.env, then:"
+    log "  systemctl start shahrah-brain"
+  fi
+}
+
 detect_ssh_port() {
   if [[ -n "$SSH_PORT" ]]; then return; fi
   if command -v sshd >/dev/null; then
@@ -175,6 +201,10 @@ main() {
   install_xray
   install_app
   setup_user_and_dirs
+  if [[ "$ROLE" == "brain" ]]; then
+    install_brain
+    return
+  fi
   init_node
   install_service
   setup_firewall

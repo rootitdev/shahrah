@@ -62,6 +62,18 @@ def _default_transport(
         raise PanelError(f"panel unreachable: {type(exc).__name__}") from exc
 
 
+def probe_user_payload(username: str, vless_uuid: str, group_ids: Sequence[int]) -> dict[str, Any]:
+    """``POST /api/user`` body for the unlimited prober account."""
+    return {
+        "username": username,
+        "proxy_settings": {"vless": {"id": vless_uuid}},
+        "group_ids": sorted(set(group_ids)),
+        "data_limit": 0,
+        "expire": 0,
+        "note": "shahrah prober - do not delete",
+    }
+
+
 class PanelClient:
     """Minimal PasarGuard REST client authenticated with an ``X-Api-Key``."""
 
@@ -99,6 +111,50 @@ class PanelClient:
             detail = data.get("detail") if isinstance(data, dict) else None
             raise PanelError(f"{method} {path} failed with HTTP {status}: {detail or 'no detail'}")
         return data
+
+    def _get_optional(self, path: str) -> Json:
+        """GET that returns ``None`` on 404 instead of raising."""
+        headers = {"X-Api-Key": self._key, "Accept": "application/json"}
+        status, data = self._transport("GET", f"{self._base}{path}", headers, None)
+        if status == 404:
+            return None
+        if status >= 400:
+            detail = data.get("detail") if isinstance(data, dict) else None
+            raise PanelError(f"GET {path} failed with HTTP {status}: {detail or 'no detail'}")
+        return data
+
+    def ensure_role(self, payload: Mapping[str, Any]) -> bool:
+        """Create an admin role unless one with that name exists. Returns True if created.
+
+        An existing role is never modified: silently changing permissions on a role that
+        real people already use would be a dangerous surprise.
+        """
+        data = self._request("GET", "/api/admin-roles")
+        roles = data.get("roles", []) if isinstance(data, dict) else []
+        if any(role.get("name") == payload["name"] for role in roles):
+            return False
+        self._request("POST", "/api/admin-role", dict(payload))
+        return True
+
+    def ensure_probe_user(self, username: str, vless_uuid: str, group_ids: Sequence[int]) -> bool:
+        """Create the unlimited account the prober connects with. Returns True if created.
+
+        The uuid is chosen by Shahrah, so the brain config is static and never has to read
+        credentials back from the panel.
+        """
+        if not group_ids:
+            raise ConfigError("the probe user needs at least one group (inbound access)")
+        existing = self._get_optional(f"/api/user/{username}")
+        if existing is not None:
+            current = (existing.get("proxy_settings") or {}).get("vless", {}).get("id")
+            if str(current).lower() != vless_uuid.lower():
+                raise ConfigError(
+                    f"panel user {username!r} already exists with a different vless id; "
+                    "use that id or delete the user first"
+                )
+            return False
+        self._request("POST", "/api/user", probe_user_payload(username, vless_uuid, group_ids))
+        return True
 
     def list_hosts(self) -> list[dict[str, Any]]:
         data = self._request("GET", "/api/hosts")

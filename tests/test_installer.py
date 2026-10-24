@@ -64,3 +64,11 @@ def test_bash_accepts_the_syntax() -> None:
     if b"\x00" in result.stdout + result.stderr:
         pytest.skip("bash is only the WSL launcher stub (no distribution installed)")
     assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
+def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> None:
+    assert "--role) ROLE=" in text
+    section = text[text.index("install_brain() {") : text.index("detect_ssh_port() {")]
+    assert "install -m 0600" in section  # brain.env is created owner-only
+    assert "brain.env" in section
+    assert "ufw" not in section  # the brain opens no ports

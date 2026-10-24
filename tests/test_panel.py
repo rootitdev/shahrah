@@ -110,6 +110,8 @@ class FakePanel:
     def __init__(self, hosts: list[dict[str, Any]]) -> None:
         self.hosts = {h["id"]: dict(h) for h in hosts}
         self.calls: list[tuple[str, str]] = []
+        self.roles: list[dict[str, Any]] = []
+        self.users: dict[str, dict[str, Any]] = {}
         panel = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -136,6 +138,20 @@ class FakePanel:
                 body = self._body()
                 if method == "GET" and self.path == "/api/hosts":
                     self._reply(200, list(panel.hosts.values()))
+                elif method == "GET" and self.path == "/api/admin-roles":
+                    self._reply(200, {"roles": panel.roles, "total": len(panel.roles)})
+                elif method == "POST" and self.path == "/api/admin-role":
+                    panel.roles.append(body)
+                    self._reply(201, body)
+                elif method == "GET" and self.path.startswith("/api/user/"):
+                    user = panel.users.get(self.path.rsplit("/", 1)[1])
+                    if user:
+                        self._reply(200, user)
+                    else:
+                        self._reply(404, {"detail": "no such user"})
+                elif method == "POST" and self.path == "/api/user":
+                    panel.users[body["username"]] = body
+                    self._reply(201, body)
                 elif method == "GET" and self.path.startswith("/api/host/"):
                     self._reply(200, panel.hosts[int(self.path.rsplit("/", 1)[1])])
                 elif method == "PUT" and self.path.startswith("/api/host/"):
@@ -227,3 +243,39 @@ def test_unreachable_panel_is_reported_cleanly() -> None:
     client = PanelClient("http://127.0.0.1:9", "key")  # discard port: nothing listens
     with pytest.raises(PanelError, match="unreachable"):
         client.list_hosts()
+
+
+PROBE_UUID = "5c1b2e0a-6f1d-4f43-9a38-3a3c9a4f9b11"
+
+
+def test_ensure_role_creates_once_and_never_modifies_existing(panel: FakePanel) -> None:
+    from shahrah.roles import brain_role
+
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    assert client.ensure_role(brain_role()) is True
+    assert client.ensure_role(brain_role()) is False
+    assert len(panel.roles) == 1
+
+
+def test_probe_user_is_created_with_our_uuid_and_unlimited_quota(panel: FakePanel) -> None:
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    assert client.ensure_probe_user("shahrah_probe", PROBE_UUID, [2, 1, 2]) is True
+    created = panel.users["shahrah_probe"]
+    assert created["proxy_settings"] == {"vless": {"id": PROBE_UUID}}
+    assert created["group_ids"] == [1, 2]
+    assert created["data_limit"] == 0
+    assert created["expire"] == 0
+    assert client.ensure_probe_user("shahrah_probe", PROBE_UUID.upper(), [1]) is False
+
+
+def test_probe_user_with_different_id_is_refused_not_overwritten(panel: FakePanel) -> None:
+    panel.users["shahrah_probe"] = {"proxy_settings": {"vless": {"id": "other"}}}
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    with pytest.raises(ConfigError, match="different vless id"):
+        client.ensure_probe_user("shahrah_probe", PROBE_UUID, [1])
+
+
+def test_probe_user_requires_a_group(panel: FakePanel) -> None:
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    with pytest.raises(ConfigError, match="group"):
+        client.ensure_probe_user("shahrah_probe", PROBE_UUID, [])

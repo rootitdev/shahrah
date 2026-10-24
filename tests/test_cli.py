@@ -158,3 +158,55 @@ def test_brain_once_reports_unreachable_path_as_degraded_with_real_xray(
     summary = json.loads(capsys.readouterr().out)
     assert summary["ranking"] == []  # the dead path is not ranked
     assert summary["active"] is None
+
+
+def test_panel_bootstrap_and_sales_role_against_a_panel(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tests.test_panel import FakePanel
+
+    fake = FakePanel([])
+    try:
+        monkeypatch.setenv("SHAHRAH_PANEL_API_KEY", FakePanel.API_KEY)
+        common = ["panel", "--panel-url", fake.url]
+        assert main([*common, "bootstrap", "--probe-group-id", "1", "2"]) == 0
+        first = json.loads(capsys.readouterr().out)
+        assert first["brain_role"] == "created"
+        assert first["probe_user_state"] == "created"
+        probe_uuid = first["probe_user"]["uuid"]
+        assert fake.users["shahrah_probe"]["proxy_settings"]["vless"]["id"] == probe_uuid
+
+        # Re-running is safe and keeps the same account.
+        again = ["bootstrap", "--probe-group-id", "1", "--probe-uuid", probe_uuid]
+        assert main([*common, *again]) == 0
+        assert json.loads(capsys.readouterr().out)["probe_user_state"] == "already existed"
+
+        assert main([*common, "sales-role", "--name", "sales-a", "--template-id", "3"]) == 0
+        assert json.loads(capsys.readouterr().out)["sales_role"] == "created"
+        assert {role["name"] for role in fake.roles} == {"shahrah-brain", "sales-a"}
+    finally:
+        fake.close()
+
+
+def test_panel_command_needs_a_url(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("SHAHRAH_PANEL_URL", raising=False)
+    code = main(["panel", "bootstrap", "--probe-group-id", "1"])
+    assert code == 2
+    assert "panel-url" in capsys.readouterr().err
+
+
+def test_panel_wrong_key_is_reported_without_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tests.test_panel import FakePanel
+
+    fake = FakePanel([])
+    try:
+        monkeypatch.setenv("SHAHRAH_PANEL_API_KEY", "nope")
+        code = main(["panel", "--panel-url", fake.url, "bootstrap", "--probe-group-id", "1"])
+        assert code == 2
+        assert "401" in capsys.readouterr().err
+    finally:
+        fake.close()

@@ -37,3 +37,14 @@ def test_sysctl_enables_bbr() -> None:
     conf = deploy.sysctl_conf()
     assert "tcp_congestion_control = bbr" in conf
     assert "default_qdisc = fq" in conf
+
+
+def test_brain_unit_has_no_privileges_and_no_listening_sockets() -> None:
+    unit = deploy.brain_unit()
+    assert "brain --config /etc/shahrah/brain.json" in unit
+    assert "EnvironmentFile=/etc/shahrah/brain.env" in unit  # the API key never sits in the unit
+    assert "CapabilityBoundingSet=\n" in unit
+    assert "NoNewPrivileges=true" in unit
+    assert "RestrictAddressFamilies=AF_INET AF_INET6" in unit
+    assert "CAP_NET_BIND_SERVICE" not in unit
+    assert "User=shahrah" in unit

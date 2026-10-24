@@ -14,12 +14,13 @@ import tempfile
 from collections.abc import Sequence
 from pathlib import Path
 
-from . import deploy
+from . import deploy, keys
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
-from .models import ConfigError, Profile
-from .panel import PanelClient, sync
+from .models import ConfigError, Profile, User
+from .panel import PanelClient, PanelError, sync
 from .prober import ProbeError, ProbeResult, XrayProbeSession
+from .roles import brain_role, sales_manager_role
 from .state import NodeState, load_state, save_state, write_private_file
 from .xray_config import dumps, render_server_config
 
@@ -71,8 +72,22 @@ def _build_parser() -> argparse.ArgumentParser:
     brain.add_argument("--once", action="store_true", help="run a single cycle and exit")
     brain.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
 
+    panel = sub.add_parser("panel", help="one-time setup of a PasarGuard panel (owner key)")
+    panel.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
+    panel_sub = panel.add_subparsers(dest="panel_command", required=True)
+    boot = panel_sub.add_parser("bootstrap", help="create the brain role and the probe user")
+    boot.add_argument("--probe-group-id", type=int, nargs="+", required=True)
+    boot.add_argument("--probe-username", default="shahrah_probe")
+    boot.add_argument("--probe-uuid", help="reuse an existing id (default: generate one)")
+    sales = panel_sub.add_parser("sales-role", help="create a least-privilege sales role")
+    sales.add_argument("--name", required=True)
+    sales.add_argument("--template-id", type=int, nargs="+", required=True)
+    sales.add_argument("--max-users", type=int)
+    sales.add_argument("--data-limit-max-bytes", type=int)
+    sales.add_argument("--expire-max-seconds", type=int)
+
     show = sub.add_parser("print", help="print host files generated for the installer")
-    show.add_argument("what", choices=["systemd-unit", "ufw", "sysctl"])
+    show.add_argument("what", choices=["systemd-unit", "brain-unit", "ufw", "sysctl"])
     show.add_argument("--ssh-port", type=int, default=22)
     return parser
 
@@ -149,6 +164,36 @@ def _run_brain(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_panel(args: argparse.Namespace) -> int:
+    if not args.panel_url:
+        raise ConfigError("--panel-url (or SHAHRAH_PANEL_URL) is required")
+    client = PanelClient(args.panel_url, os.environ.get("SHAHRAH_PANEL_API_KEY", ""))
+    try:
+        if args.panel_command == "bootstrap":
+            probe_uuid = args.probe_uuid or keys.generate_uuid()
+            user = User(probe_uuid, args.probe_username)  # validates both values
+            role_created = client.ensure_role(brain_role())
+            user_created = client.ensure_probe_user(user.label, user.uuid, args.probe_group_id)
+            result = {
+                "brain_role": "created" if role_created else "already existed",
+                "probe_user": {"uuid": user.uuid, "label": user.label},
+                "probe_user_state": "created" if user_created else "already existed",
+            }
+        else:
+            role = sales_manager_role(
+                args.name,
+                allowed_template_ids=args.template_id,
+                max_users=args.max_users,
+                data_limit_max_bytes=args.data_limit_max_bytes,
+                expire_max_seconds=args.expire_max_seconds,
+            )
+            result = {"sales_role": "created" if client.ensure_role(role) else "already existed"}
+    except PanelError as exc:
+        raise ConfigError(str(exc)) from exc
+    sys.stdout.write(json.dumps(result, indent=2) + "\n")
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
     state_path: Path = args.state
     out = sys.stdout
@@ -170,6 +215,8 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "print":
         if args.what == "systemd-unit":
             out.write(deploy.systemd_unit())
+        elif args.what == "brain-unit":
+            out.write(deploy.brain_unit())
         elif args.what == "sysctl":
             out.write(deploy.sysctl_conf())
         else:
@@ -180,6 +227,8 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "brain":
         return _run_brain(args)
+    if args.command == "panel":
+        return _run_panel(args)
 
     state = load_state(state_path)
 

@@ -40,11 +40,38 @@ Safety rules (unit-tested):
 
 ## Setting it up
 
-1. In PasarGuard create the *brain* role from `brain_role()` (`POST /api/admin-role`), an admin
-   with that role, and an API key for it.
-2. Create one sales role per tier from `sales_manager_role(...)` with the plan template ids it
-   may sell.
-3. Create one panel host per Shahrah path with a **unique remark**.
+Only the panel *owner* key is used for the one-time setup; pass it through the environment, never
+on the command line (arguments are visible to every local user).
+
+```bash
+export SHAHRAH_PANEL_URL=https://panel.example.org
+export SHAHRAH_PANEL_API_KEY=<owner key>
+
+# 1. brain role + the unlimited account the prober connects with (needs the group id that
+#    grants access to your REALITY inbound). Prints the probe user's uuid for brain.json.
+shahrah panel bootstrap --probe-group-id 1
+
+# 2. one sales role per tier, limited to the plan templates it may sell
+shahrah panel sales-role --name sales-basic --template-id 3 --max-users 100
+```
+
+Both commands are idempotent and never modify an existing role or user.
+
+Then, in the panel UI: create an admin with the `shahrah-brain` role and an API key for it, and
+one host per Shahrah path with a **unique remark**.
+
+On the machine that runs the brain (it only makes outbound connections):
+
+```bash
+sudo ./deploy/install.sh --role brain
+# write /etc/shahrah/brain.json  (endpoints, probe_user from step 1, remarks)
+# put SHAHRAH_PANEL_URL and the *brain* API key into /etc/shahrah/brain.env (0600)
+sudo systemctl start shahrah-brain
+```
+
+`brain.json` holds public routing data only (hosts, ports, public keys, short ids); the probe
+user's uuid must also be a user on every exit it probes, which step 1 guarantees when the exits
+are panel nodes.
 
 ## Not covered here
 

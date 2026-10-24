@@ -15,6 +15,7 @@ from .models import ConfigError, validate_port
 SERVICE_USER = "shahrah"
 DEFAULT_CONFIG_DIR = PurePosixPath("/etc/shahrah")
 DEFAULT_XRAY_BIN = PurePosixPath("/usr/local/bin/xray")
+DEFAULT_SHAHRAH_BIN = PurePosixPath("/usr/local/bin/shahrah")
 
 
 def systemd_unit(
@@ -49,6 +50,47 @@ ProtectKernelTunables=true
 ProtectKernelModules=true
 ProtectControlGroups=true
 RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
+def brain_unit(
+    *,
+    shahrah_bin: PurePosixPath = DEFAULT_SHAHRAH_BIN,
+    xray_bin: PurePosixPath = DEFAULT_XRAY_BIN,
+    config: PurePosixPath = DEFAULT_CONFIG_DIR / "brain.json",
+    env_file: PurePosixPath = DEFAULT_CONFIG_DIR / "brain.env",
+    user: str = SERVICE_USER,
+) -> str:
+    """The brain only makes outbound connections: no capabilities, no listening sockets."""
+    return f"""[Unit]
+Description=Shahrah brain (tunnel health prober and panel steering)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={user}
+Group={user}
+EnvironmentFile={env_file}
+ExecStart={shahrah_bin} brain --config {config} --xray-bin {xray_bin}
+Restart=always
+RestartSec=10
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictAddressFamilies=AF_INET AF_INET6
 LockPersonality=true
 MemoryDenyWriteExecute=true
 
