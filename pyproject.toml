@@ -13,6 +13,9 @@ dependencies = []  # Runtime is standard-library only so it installs on any fres
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
 
+[project.scripts]
+shahrah = "shahrah.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
