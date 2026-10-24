@@ -124,3 +124,37 @@ def test_print_helpers(state_file: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert "ufw allow 2222/tcp" in capsys.readouterr().out
     assert run(state_file, "print", "sysctl") == 0
     assert "bbr" in capsys.readouterr().out
+
+
+def test_brain_once_reports_unreachable_path_as_degraded_with_real_xray(
+    tmp_path: Path,
+    xray_bin: str,
+    real_keypair: tuple[str, str],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import socket
+
+    with socket.socket() as sock:  # a port nothing listens on
+        sock.bind(("127.0.0.1", 0))
+        dead_port = sock.getsockname()[1]
+    config = {
+        "endpoints": [
+            {
+                "name": "nowhere",
+                "host": "127.0.0.1",
+                "port": dead_port,
+                "profile": "reality-vision",
+                "public_key": real_keypair[1],
+                "short_id": "ab12",
+                "sni": "www.cloudflare.com",
+            }
+        ],
+        "probe_user": {"uuid": "5c1b2e0a-6f1d-4f43-9a38-3a3c9a4f9b11", "label": "probe"},
+    }
+    path = tmp_path / "brain.json"
+    path.write_text(json.dumps(config), encoding="utf-8")
+    code = main(["brain", "--config", str(path), "--xray-bin", xray_bin, "--once"])
+    assert code == 0
+    summary = json.loads(capsys.readouterr().out)
+    assert summary["ranking"] == []  # the dead path is not ranked
+    assert summary["active"] is None

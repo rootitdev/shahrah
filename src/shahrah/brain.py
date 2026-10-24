@@ -1,0 +1,170 @@
+"""The brain loop: probe real tunnels -> decide with the Oracle -> steer the panel.
+
+All collaborators are injected, so the loop is fully unit-testable without Xray, a network
+or a panel. Failure policy: a failing panel or prober never crashes the loop and never
+causes destructive changes; it logs and tries again next cycle.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+from .models import ConfigError, Endpoint, Profile, User
+from .oracle import Decision, Mode, OracleConfig, OracleState, PathSpec, Probe, step
+from .panel import PanelError, SyncPlan
+from .prober import ProbeError, ProbeResult
+
+log = logging.getLogger("shahrah.brain")
+
+ProbeRound = Callable[[], Sequence[ProbeResult]]
+PanelSync = Callable[[Sequence[str]], SyncPlan]
+Clock = Callable[[], float]
+
+
+@dataclass(frozen=True, slots=True)
+class BrainConfig:
+    """Public routing data only. Secrets (panel API key) come from the environment."""
+
+    endpoints: tuple[Endpoint, ...]
+    probe_user: User
+    remarks: Mapping[str, str]  # endpoint name -> panel host remark
+    interval_s: float = 30.0
+    oracle: OracleConfig = field(default_factory=OracleConfig)
+
+    def __post_init__(self) -> None:
+        if not self.endpoints:
+            raise ConfigError("at least one endpoint is required")
+        names = [endpoint.name for endpoint in self.endpoints]
+        if len(set(names)) != len(names):
+            raise ConfigError("endpoint names must be unique")
+        unknown = set(self.remarks) - set(names)
+        if unknown:
+            raise ConfigError(f"remarks refer to unknown endpoints: {sorted(unknown)}")
+        if self.interval_s < 5:
+            raise ConfigError("interval_s below 5 seconds would hammer the servers")
+
+    def specs(self) -> list[PathSpec]:
+        return [
+            PathSpec(e.name, priority=e.priority, lockdown_capable=e.lockdown_capable)
+            for e in self.endpoints
+        ]
+
+    @classmethod
+    def from_json(cls, text: str) -> BrainConfig:
+        try:
+            data = json.loads(text)
+            endpoints = tuple(
+                Endpoint(**{**item, "profile": Profile(item["profile"])})
+                for item in data["endpoints"]
+            )
+            user = User(data["probe_user"]["uuid"], data["probe_user"]["label"])
+            oracle = OracleConfig(**data.get("oracle", {}))
+            return cls(
+                endpoints=endpoints,
+                probe_user=user,
+                remarks=dict(data.get("remarks", {})),
+                interval_s=float(data.get("interval_s", 30.0)),
+                oracle=oracle,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            if isinstance(exc, ConfigError):
+                raise
+            raise ConfigError(f"brain config is invalid: {exc}") from exc
+
+
+class Brain:
+    def __init__(
+        self,
+        config: BrainConfig,
+        probe_round: ProbeRound,
+        panel_sync: PanelSync | None = None,
+        *,
+        clock: Clock = time.monotonic,
+    ) -> None:
+        self._config = config
+        self._specs = config.specs()
+        self._probe_round = probe_round
+        self._panel_sync = panel_sync
+        self._clock = clock
+        self._state = OracleState()
+        self._synced_ranking: tuple[str, ...] | None = None
+
+    @property
+    def state(self) -> OracleState:
+        return self._state
+
+    def cycle(self) -> Decision | None:
+        """Run one probe -> decide -> sync round. Returns ``None`` if probing itself failed."""
+        try:
+            results = self._probe_round()
+        except ProbeError as exc:
+            log.error("probe machinery failed, skipping cycle: %s", exc)
+            return None
+        probes = [Probe(r.endpoint, r.ok, r.latency_ms) for r in results]
+        previous_mode = self._state.mode
+        decision = step(self._config.oracle, self._state, self._specs, probes, self._clock())
+        self._state = decision.state
+
+        for result in results:
+            if not result.ok:
+                log.warning("path %s failed: %s", result.endpoint, result.detail)
+        if decision.switched:
+            log.info("active path -> %s (%s)", decision.state.active, decision.reason)
+        if decision.state.mode is not previous_mode:
+            log.warning("mode %s -> %s", previous_mode, decision.state.mode)
+
+        self._sync_panel(decision.ranking)
+        return decision
+
+    def _sync_panel(self, ranking: tuple[str, ...]) -> None:
+        if self._panel_sync is None or ranking == self._synced_ranking:
+            return
+        # Only the ranking of mapped paths matters to the panel.
+        mapped = tuple(name for name in ranking if name in self._config.remarks)
+        try:
+            plan = self._panel_sync(mapped)
+        except (PanelError, ConfigError) as exc:
+            log.error("panel sync failed, will retry next cycle: %s", exc)
+            return
+        if plan.skipped_reason:
+            log.warning("panel untouched: %s", plan.skipped_reason)
+            return  # not recorded as synced, so it is retried once paths recover
+        self._synced_ranking = ranking
+        if not plan.empty:
+            log.info(
+                "panel updated: enable=%s disable=%s reorder=%s",
+                plan.enable,
+                plan.disable,
+                dict(plan.priorities),
+            )
+
+
+def run_forever(
+    brain: Brain,
+    interval_s: float,
+    *,
+    sleep: Callable[[float], None] = time.sleep,
+    stop: Callable[[], bool] = lambda: False,
+) -> None:
+    while not stop():
+        started = time.monotonic()
+        brain.cycle()
+        sleep(max(0.0, interval_s - (time.monotonic() - started)))
+
+
+def describe(decision: Decision) -> dict[str, Any]:
+    """Compact, secret-free summary suitable for logs or a status endpoint."""
+    return {
+        "mode": str(decision.state.mode),
+        "active": decision.state.active,
+        "ranking": list(decision.ranking),
+        "reason": decision.reason,
+    }
+
+
+__all__ = ["Brain", "BrainConfig", "Mode", "describe", "run_forever"]

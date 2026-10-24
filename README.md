@@ -4,10 +4,10 @@ A resilient anti-censorship VPN platform built on [Xray-core](https://github.com
 Goal: stable access to social media, messengers and AI services for thousands of users in
 heavily filtered networks, with servers that are hard to find and easy to install.
 
-> **Status: early development.** The control-plane core, the real tunnel prober and a
-> one-command node installer exist. The management panel integration and the
-> prober/oracle daemon are not written yet (see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)).
-> The installer has not yet been exercised on a real server.
+> **Status: early development.** Control-plane core, real tunnel prober, node installer,
+> PasarGuard integration and the brain loop exist and are unit/loopback tested. **Nothing has
+> been run on real servers yet** (installer, real-network behaviour, 1000+ user load). See
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PANEL.md](docs/PANEL.md).
 
 ## Install a node
 
@@ -44,6 +44,8 @@ shahrah sub alice         # base64 subscription body
 | `shahrah.oracle` | Pure path-health decision engine: fail/recover streaks, minimum dwell time, outage and allowlist-style (`restricted`) detection. |
 | `shahrah.prober`, `shahrah.xray_client` | Real tunnel prober: one Xray client process, a SOCKS port per endpoint, an actual HTTPS request through each tunnel (not just a TLS check of the edge). Its output feeds the oracle. |
 | `shahrah.keys`, `shahrah.state` | Pure-Python X25519 (RFC 7748) key generation and the atomic, owner-only node state file. |
+| `shahrah.panel`, `shahrah.roles` | PasarGuard integration: reorder/disable panel hosts from the oracle ranking (fail-open when nothing is healthy), least-privilege role presets validated against the panel's real models. |
+| `shahrah.brain` | The loop: probe -> oracle -> panel, tolerant of prober and panel failures. Run with `shahrah brain --config brain.json`. |
 | `shahrah.deploy`, `shahrah.cli` | systemd unit, firewall plan and sysctl generators; the `shahrah` command. |
 
 Rendered configs are verified against a **real Xray binary** (`xray run -test`), and the prober

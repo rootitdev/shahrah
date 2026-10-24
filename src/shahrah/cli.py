@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import functools
+import json
+import logging
 import os
 import shutil
 import subprocess
@@ -12,8 +15,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from . import deploy
+from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Profile
+from .panel import PanelClient, sync
+from .prober import ProbeError, ProbeResult, XrayProbeSession
 from .state import NodeState, load_state, save_state, write_private_file
 from .xray_config import dumps, render_server_config
 
@@ -58,6 +64,13 @@ def _build_parser() -> argparse.ArgumentParser:
     subscription.add_argument("label")
     subscription.add_argument("--name", default="main")
 
+    brain = sub.add_parser("brain", help="probe tunnels and steer the management panel")
+    brain.add_argument("--config", type=Path, required=True, help="brain JSON config")
+    brain.add_argument("--xray-bin", default="xray")
+    brain.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
+    brain.add_argument("--once", action="store_true", help="run a single cycle and exit")
+    brain.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
+
     show = sub.add_parser("print", help="print host files generated for the installer")
     show.add_argument("what", choices=["systemd-unit", "ufw", "sysctl"])
     show.add_argument("--ssh-port", type=int, default=22)
@@ -89,6 +102,53 @@ def _write_service_config(path: Path, text: str, group: str | None) -> None:
         path.chmod(0o640)
 
 
+def _run_brain(args: argparse.Namespace) -> int:
+    """Wire prober, oracle and panel together. The panel API key is read from the environment
+    only: command-line arguments are visible to every local user through the process list."""
+    logging.basicConfig(
+        level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    config = BrainConfig.from_json(Path(args.config).read_text(encoding="utf-8"))
+
+    panel_sync: PanelSync | None = None
+    if args.panel_url:
+        client = PanelClient(args.panel_url, os.environ.get("SHAHRAH_PANEL_API_KEY", ""))
+        panel_sync = functools.partial(sync, client, path_to_remark=dict(config.remarks))
+    else:
+        logging.getLogger("shahrah.brain").warning("no --panel-url: observing only")
+
+    session: XrayProbeSession | None = None
+
+    def probe_round() -> list[ProbeResult]:
+        nonlocal session
+        try:
+            if session is None:
+                session = XrayProbeSession(args.xray_bin, config.endpoints, config.probe_user)
+                session.start()
+            return session.probe_all()
+        except (ProbeError, OSError) as exc:
+            if session is not None:
+                session.stop()
+            session = None  # a fresh Xray process is started on the next cycle
+            raise ProbeError(str(exc)) from exc
+
+    brain = Brain(config, probe_round, panel_sync)
+    try:
+        if args.once:
+            decision = brain.cycle()
+            if decision is None:
+                return 1
+            sys.stdout.write(json.dumps(describe(decision), indent=2) + "\n")
+            return 0
+        run_forever(brain, config.interval_s)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if session is not None:
+            session.stop()
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
     state_path: Path = args.state
     out = sys.stdout
@@ -117,6 +177,9 @@ def _run(args: argparse.Namespace) -> int:
             out.write("\n".join(deploy.ufw_commands(ssh_port=args.ssh_port, public_ports=ports)))
             out.write("\n")
         return 0
+
+    if args.command == "brain":
+        return _run_brain(args)
 
     state = load_state(state_path)
 
