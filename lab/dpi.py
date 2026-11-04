@@ -15,6 +15,7 @@ Verdicts: ACCEPT, or REPEAT with mark 1 so the iptables rules in censor.sh reset
 from __future__ import annotations
 
 import argparse
+import os
 import socket
 import struct
 import sys
@@ -31,6 +32,7 @@ CFG_CMD, CFG_PARAMS = 1, 2
 CMD_BIND = 1
 A_PACKET_HDR, A_VERDICT_HDR, A_MARK, A_PAYLOAD = 1, 2, 3, 10
 NF_ACCEPT, NF_REPEAT = 1, 4
+DUMP_DIR = Path(os.environ["DPI_DUMP"]) if os.environ.get("DPI_DUMP") else None
 
 
 # --- pure parsing (unit-tested in tests/test_lab_units.py) -----------------------------------
@@ -205,6 +207,8 @@ def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> Non
                 if len(packet) > 9 and packet[9] == 17:
                     dst, _, payload = udp_payload(packet)
                     sni, verdict = judge_udp(payload, dst, allow, strict_udp)
+                    if DUMP_DIR is not None and len(list(DUMP_DIR.glob("udp-*.bin"))) < 8:
+                        (DUMP_DIR / f"udp-{pkt_id}.bin").write_bytes(payload)
                     if verdict != "pass" and sni is None:
                         print(f"dpi: udp -> {dst}: {verdict}", flush=True)
                 else:
