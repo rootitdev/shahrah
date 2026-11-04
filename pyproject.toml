@@ -22,10 +22,11 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q -m 'not load'"
+addopts = "-q -m 'not load and not lab'"
 markers = [
     "e2e: needs a real Xray binary and internet access (loopback server + client)",
     "load: slow local load tests, run explicitly with `pytest -m load`",
+    "lab: root-only netns censorship lab (lab/run.sh), run with SHAHRAH_LAB=1 pytest -m lab",
 ]
 
 [tool.ruff]
