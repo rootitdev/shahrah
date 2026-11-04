@@ -35,7 +35,7 @@ binaries() {
 certs() {
   openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 \
     -subj "/CN=Shahrah Lab CA" -keyout "$RUN/ca.key" -out "$RUN/ca.crt" 2>/dev/null
-  leaf cover cover.lab; leaf hy2 exit.lab
+  leaf cover cover.lab; leaf hy2 exit.lab; leaf cdn cdn.lab
 }
 leaf() {
   openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=$2" \
@@ -57,12 +57,15 @@ up() {
   bg censor dnsd python3 "$HERE/dnsd.py" 10.0.1.1
 
   # exit node: REALITY Vision 443 + REALITY XHTTP 80, Hysteria2 udp/8443 (salamander, pinned)
-  $SH init --host 10.0.4.2 --target cover.lab --extra-listener 80:reality-xhttp >/dev/null
+  $SH init --host 10.0.4.2 --target cover.lab --extra-listener 80:reality-xhttp \
+    --extra-listener "8080:cdn-xhttp:cdn.lab:/$(openssl rand -hex 12)" >/dev/null
   $SH user add probe >/dev/null
   $SH hysteria2 enable --port 8443 --sni exit.lab --cert "$RUN/hy2.crt" \
     --cert-path "$RUN/hy2.crt" --key-path "$RUN/hy2.key" >/dev/null
   $SH apply --xray-bin "$BIN/xray" --config-out "$RUN/xray-exit.json" >/dev/null
   $SH hysteria2 server --out "$RUN/hy2-server.yaml" >/dev/null
+  # lab-only: the cover lives in 198.18/15, which the Hysteria2 ACL (like Xray) refuses
+  sed -i 's#^  inline:$#  inline:\n    - "direct(198.18.5.2/32)"#' "$RUN/hy2-server.yaml"
   # Lab-only: Xray 26 freedom blackholes reserved ranges (incl. 198.18.0.0/15) for proxied
   # traffic. Open exactly the cover's 443/80 so tunnels can reach it; production keeps defaults.
   python3 - "$RUN/xray-exit.json" <<'PY'
@@ -77,6 +80,12 @@ json.dump(cfg, open(path, "w"), indent=2)
 PY
   bg exit xray-exit "$BIN/xray" run -c "$RUN/xray-exit.json"
   bg exit hy2-exit "$BIN/hysteria" server -c "$RUN/hy2-server.yaml" --disable-update-check
+  # same server without salamander on 8444: plain QUIC, so the DPI can read its SNI
+  sed -e 's/^listen: .*/listen: ":8444"/' -e '/^obfs:/,/^    password:/d' "$RUN/hy2-server.yaml" \
+    > "$RUN/hy2-plain.yaml"
+  bg exit hy2-plain "$BIN/hysteria" server -c "$RUN/hy2-plain.yaml" --disable-update-check
+  # CDN edge in front of the cdn-xhttp origin listener
+  bg cdn cdn-edge python3 "$HERE/cdn_edge.py" "$RUN/cdn.crt" "$RUN/cdn.key" 10.0.4.2 8080
 
   # WaterWall relay: users dial iran:443, exit dials iran:8443 (reverse), cover pinned by IP
   local ww=(--iran-ip 10.0.2.2 --exit-ip 10.0.4.2 --key-file "$RUN/backhaul.key"
