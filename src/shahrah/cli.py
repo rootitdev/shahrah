@@ -37,6 +37,7 @@ from . import (
     subserve,
     tactics,
     vantage,
+    waterwall,
 )
 from . import soak as soakmod
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
@@ -491,6 +492,24 @@ def _build_parser() -> argparse.ArgumentParser:
     hy.add_argument("--unit-role", choices=["server", "client"], default="server")
     hy.add_argument("--config-path", default="/etc/shahrah/hysteria2.yaml")
     hy.add_argument("--out", type=Path, help="write the config here (mode 0600)")
+
+    wwp = sub.add_parser(
+        "waterwall-config",
+        help="render the WaterWall Iran<->exit backhaul (config.json + core.json) or its unit",
+    )
+    wwp.add_argument("side", choices=["iran", "exit", "unit"])
+    wwp.add_argument("--iran-ip", default="")
+    wwp.add_argument("--exit-ip", default="")
+    wwp.add_argument("--key-file", type=Path, help="shared Reality secret (created if missing)")
+    wwp.add_argument("--mode", choices=sorted(waterwall.MODES), default="reverse")
+    wwp.add_argument("--user-port", type=int, action="append", help="repeatable (default 443)")
+    wwp.add_argument("--tunnel-port", type=int, default=8443)
+    wwp.add_argument("--exit-service", default="127.0.0.1:443", help="Xray on the exit")
+    wwp.add_argument("--cover-sni", default="www.speedtest.net")
+    wwp.add_argument("--pool", type=int, default=8, help="reverse: idle warm connections")
+    wwp.add_argument("--open-peer", action="store_true", help="do not whitelist the peer IP")
+    wwp.add_argument("--workdir", default="/etc/shahrah/waterwall")
+    wwp.add_argument("--out-dir", type=Path, help="write config.json/core.json here (0600)")
 
     tsign = sub.add_parser(
         "tactics-sign",
@@ -1027,6 +1046,40 @@ def _run_hysteria2(
     return 0
 
 
+def _run_waterwall(args: argparse.Namespace, out: TextIO) -> int:
+    if args.side == "unit":
+        out.write(waterwall.systemd_unit(args.workdir))
+        return 0
+    if not args.iran_ip or not args.exit_ip or args.key_file is None:
+        raise ConfigError("--iran-ip, --exit-ip and --key-file are required")
+    if not args.key_file.exists():
+        write_private_file(args.key_file, secrets.token_urlsafe(18) + "\n")  # 24 chars
+    backhaul = waterwall.Backhaul(
+        iran_ip=args.iran_ip,
+        exit_ip=args.exit_ip,
+        password=args.key_file.read_text(encoding="utf-8").strip(),
+        cover_sni=args.cover_sni,
+        mode=args.mode,
+        user_ports=tuple(args.user_port or [443]),
+        tunnel_port=args.tunnel_port,
+        exit_service=args.exit_service,
+        pool=args.pool,
+        restrict_peer=not args.open_peer,
+    )
+    cfg = (
+        waterwall.render_iran(backhaul) if args.side == "iran" else waterwall.render_exit(backhaul)
+    )
+    if args.out_dir is None:
+        out.write(waterwall.dumps(cfg))
+        return 0
+    write_private_file(args.out_dir / "config.json", waterwall.dumps(cfg))
+    write_private_file(
+        args.out_dir / "core.json", waterwall.dumps(waterwall.core_json("config.json"))
+    )
+    out.write(f"wrote {args.out_dir}/config.json and core.json ({args.side}, {args.mode})\n")
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
     state_path: Path = args.state
     out = sys.stdout
@@ -1181,6 +1234,9 @@ def _run(args: argparse.Namespace) -> int:
         else:
             out.write(text)
         return 0
+
+    if args.command == "waterwall-config":
+        return _run_waterwall(args, out)
 
     if args.command == "tactics-sign":
         key_hex = os.environ.get("SHAHRAH_TACTICS_KEY", "").strip()
