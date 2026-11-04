@@ -518,6 +518,9 @@ def _build_parser() -> argparse.ArgumentParser:
     wwp.add_argument("--cover-sni", default="www.speedtest.net")
     wwp.add_argument("--cover-addr", default="", help="pinned cover IP (skip DNS per handshake)")
     wwp.add_argument("--pool", type=int, default=8, help="reverse: idle warm connections")
+    wwp.add_argument(
+        "--no-verify-cover", action="store_true", help="cover uses a private CA (labs only)"
+    )
     wwp.add_argument("--open-peer", action="store_true", help="do not whitelist the peer IP")
     wwp.add_argument("--workdir", default="/etc/shahrah/waterwall")
     wwp.add_argument("--out-dir", type=Path, help="write config.json/core.json here (0600)")
@@ -1077,6 +1080,7 @@ def _run_waterwall(args: argparse.Namespace, out: TextIO) -> int:
         exit_service=args.exit_service,
         pool=args.pool,
         restrict_peer=not args.open_peer,
+        verify_cover=not args.no_verify_cover,
     )
     cfg = (
         waterwall.render_iran(backhaul) if args.side == "iran" else waterwall.render_exit(backhaul)

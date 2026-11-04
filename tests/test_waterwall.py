@@ -72,6 +72,14 @@ def test_cover_addr_skips_dns() -> None:
         _bh(cover_addr="cover.example.org")
 
 
+def test_cover_verification_is_on_by_default() -> None:
+    def client(b: ww.Backhaul) -> dict:
+        return next(n for n in ww.render_exit(b)["nodes"] if n["type"] == "RealityClient")
+
+    assert client(_bh())["settings"]["verify"] is True
+    assert client(_bh(verify_cover=False))["settings"]["verify"] is False
+
+
 def test_open_peer_when_asked() -> None:
     iran = ww.render_iran(_bh(restrict_peer=False))
     assert all("whitelist" not in n["settings"] for n in iran["nodes"])

@@ -64,6 +64,9 @@ class Backhaul:
     workers: int = 0  # 0 = one per CPU
     listen: str = "0.0.0.0"  # noqa: S104 - public listener by design
     restrict_peer: bool = True
+    # The exit-side RealityClient verifies the cover's certificate against public CAs. Only
+    # turn off for a private cover (the lab's own CA); the peer secret still authenticates.
+    verify_cover: bool = True
 
     def __post_init__(self) -> None:
         for value, what in ((self.iran_ip, "iran_ip"), (self.exit_ip, "exit_ip")):
@@ -132,7 +135,11 @@ def _connector(name: str, host: str, port: int) -> dict:
 
 def _reality(b: Backhaul, side: str, nxt: str) -> dict:
     if side == "client":
-        settings: dict[str, Any] = {"sni": b.cover_sni, "verify": True, "password": b.password}
+        settings: dict[str, Any] = {
+            "sni": b.cover_sni,
+            "verify": b.verify_cover,
+            "password": b.password,
+        }
         return _node("bh-reality-client", "RealityClient", settings, nxt)
     settings = {"destination": "bh-cover", "password": b.password}
     return _node("bh-reality-server", "RealityServer", settings, nxt)
