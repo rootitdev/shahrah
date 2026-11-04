@@ -75,7 +75,9 @@ def make_handler(
             try:
                 state = load_state(state_path)
                 user = state.find_user(label)
-                body = build_subscription(state.endpoints(), user).encode()
+                body = build_subscription(
+                    state.endpoints(), user, extra_links=state.hysteria2_links(user)
+                ).encode()
             except (ConfigError, OSError, ValueError) as exc:
                 data = json.dumps({"error": str(exc)}).encode()
                 self.send_response(404)

@@ -72,11 +72,14 @@ def build_subscription(
     endpoints: Sequence[Endpoint],
     user: User,
     healthy_ranking: Sequence[str] | None = None,
+    extra_links: Sequence[str] = (),
 ) -> str:
     """Build the subscription body for ``user``.
 
     When ``healthy_ranking`` (best first, from the path-health engine) is given, only those
     endpoints are included, in that order. Without it every endpoint is listed by priority.
+    ``extra_links`` (e.g. ``hysteria2://``) are appended after the VLESS links: REALITY over
+    TCP stays first because UDP is the first thing filtered in an allowlist regime.
     """
     by_name = {endpoint.name: endpoint for endpoint in endpoints}
     if len(by_name) != len(endpoints):
@@ -88,4 +91,4 @@ def build_subscription(
         if unknown:
             raise ValueError(f"ranking references unknown endpoints: {unknown}")
         ordered = [by_name[name] for name in healthy_ranking]
-    return encode_subscription(vless_link(endpoint, user) for endpoint in ordered)
+    return encode_subscription([*(vless_link(e, user) for e in ordered), *extra_links])

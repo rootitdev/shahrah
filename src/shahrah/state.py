@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import keys
+from .hysteria2 import Hy2Settings, share_link
 from .models import (
     CRISIS_PORTS,
     RISKY_TARGET_SUFFIXES,
@@ -54,6 +55,7 @@ class NodeState:
     stats_api_port: int | None = None  # loopback StatsService; None = disabled
     users: tuple[User, ...] = field(default_factory=tuple)
     extra_listeners: tuple[Listener, ...] = ()
+    hysteria2: Hy2Settings | None = None  # optional QUIC/UDP social path
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
@@ -126,6 +128,17 @@ class NodeState:
     def with_access_log(self, path: str | None) -> NodeState:
         """Enable or disable the Xray access log (required for SNI watch)."""
         return replace(self, access_log=path)
+
+    def with_hysteria2(self, settings: Hy2Settings | None) -> NodeState:
+        """Enable (or with ``None`` disable) the Hysteria2 UDP path."""
+        return replace(self, hysteria2=settings)
+
+    def hysteria2_links(self, user: User, prefix: str = "main") -> list[str]:
+        """``hysteria2://`` links for ``user`` (empty when the path is disabled)."""
+        if self.hysteria2 is None:
+            return []
+        name = f"{prefix}-hy2-{self.hysteria2.port}"
+        return [share_link(self.hysteria2, self.public_host, user, name)]
 
     def with_stats_api(self, port: int | None) -> NodeState:
         """Enable or disable the loopback StatsService used for usage accounting."""
@@ -259,6 +272,8 @@ class NodeState:
                 for item in self.extra_listeners
             ],
         }
+        if self.hysteria2 is not None:
+            data["hysteria2"] = self.hysteria2.to_dict()
         return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
     @classmethod
@@ -294,6 +309,9 @@ class NodeState:
                     )
                     for i in data.get("listeners", [])
                 ),
+                hysteria2=Hy2Settings.from_dict(data["hysteria2"])
+                if data.get("hysteria2")
+                else None,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             if isinstance(exc, ConfigError):

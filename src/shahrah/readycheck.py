@@ -16,6 +16,8 @@ from . import sni_dns
 from .models import ConfigError, is_ip
 
 _VLESS = re.compile(r"^vless://", re.IGNORECASE)
+_HY2 = re.compile(r"^(?:hysteria2|hy2)://", re.IGNORECASE)
+_PIN = re.compile(r"^[0-9a-fA-F:]{64,95}$")
 
 
 @dataclass
@@ -50,7 +52,8 @@ def decode_subscription(body: str) -> list[str]:
     text = body.strip()
     if not text:
         raise ConfigError("subscription body is empty")
-    if _VLESS.search(text.splitlines()[0].strip()):
+    first = text.splitlines()[0].strip()
+    if _VLESS.search(first) or _HY2.search(first):
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     else:
         try:
@@ -66,7 +69,26 @@ def decode_subscription(body: str) -> list[str]:
     return lines
 
 
+def _check_hy2(link: str) -> LinkCheck:
+    parsed = urlparse(link)
+    name = unquote(parsed.fragment or "") or parsed.hostname or "?"
+    qs = {k: (v[0] if v else "") for k, v in parse_qs(parsed.query).items()}
+    if not parsed.username or not parsed.hostname:
+        return LinkCheck(name, False, "hysteria2", "missing auth or host")
+    if qs.get("obfs") != "salamander" or len(qs.get("obfs-password", "")) < 16:
+        # Bare QUIC is trivially classified; the product only ships obfuscated links.
+        return LinkCheck(name, False, "hysteria2", "salamander obfs missing or weak")
+    if qs.get("insecure") == "1" and not qs.get("pinSHA256"):
+        return LinkCheck(name, False, "hysteria2", "insecure=1 without pinSHA256")
+    pin = qs.get("pinSHA256", "")
+    if pin and not _PIN.match(pin):
+        return LinkCheck(name, False, "hysteria2", "pinSHA256 is not a 64-hex cert hash")
+    return LinkCheck(name, True, "hysteria2", "")
+
+
 def _check_vless(link: str) -> LinkCheck:
+    if _HY2.match(link):
+        return _check_hy2(link)
     if not _VLESS.match(link):
         return LinkCheck("?", False, "unknown", "not a vless:// link")
     parsed = urlparse(link)

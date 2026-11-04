@@ -16,12 +16,14 @@ import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TextIO
 
 from . import (
     accounting,
     capacity,
     client_template,
     deploy,
+    hysteria2,
     keys,
     leakcheck,
     loadtest,
@@ -221,6 +223,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="subscription file (default: stdin)",
     )
     ready.add_argument("--json", action="store_true")
+    ready.add_argument(
+        "--sni-dns",
+        action="store_true",
+        help="also check every REALITY link's SNI resolves near its server IP (bbs#668)",
+    )
+    ready.add_argument(
+        "--strict-sni", action="store_true", help="--sni-dns: accept only own-domain"
+    )
 
     panel = sub.add_parser("panel", help="one-time setup of a PasarGuard panel (owner key)")
     panel.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
@@ -452,6 +462,28 @@ def _build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--unit-role", choices=["server", "client"], default="server")
     pq.add_argument("--config-path", default="/etc/shahrah/paqet.yaml")
     pq.add_argument("--out", type=Path, help="write the config here (mode 0600)")
+
+    hy = sub.add_parser(
+        "hysteria2",
+        help="Hysteria2 QUIC/UDP social path: enable, render configs, port-hop rules, unit",
+    )
+    hy.add_argument(
+        "action",
+        choices=["enable", "disable", "show", "server", "client", "hop-rules", "unit"],
+    )
+    hy.add_argument("--port", type=int, default=8443, help="UDP listen port")
+    hy.add_argument("--hop", default="", help="UDP port-hopping range, e.g. 20000-40000")
+    hy.add_argument("--sni", default="", help="certificate name (default: public host)")
+    hy.add_argument("--cert", type=Path, help="enable: PEM to pin (self-signed certificate)")
+    hy.add_argument("--cert-path", default="/etc/shahrah/hy2.crt")
+    hy.add_argument("--key-path", default="/etc/shahrah/hy2.key")
+    hy.add_argument("--tuning", choices=sorted(hysteria2.TUNING), default="social")
+    hy.add_argument("--label", default="", help="client: user label")
+    hy.add_argument("--socks", default="127.0.0.1:1081", help="client: loopback SOCKS listen")
+    hy.add_argument("--interface", default="eth0", help="hop-rules: public interface")
+    hy.add_argument("--unit-role", choices=["server", "client"], default="server")
+    hy.add_argument("--config-path", default="/etc/shahrah/hysteria2.yaml")
+    hy.add_argument("--out", type=Path, help="write the config here (mode 0600)")
 
     tsign = sub.add_parser(
         "tactics-sign",
@@ -920,6 +952,67 @@ def _run_panel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_hop(text: str) -> tuple[int, int] | None:
+    if not text:
+        return None
+    low, sep, high = text.partition("-")
+    if not sep or not low.isdigit() or not high.isdigit():
+        raise ConfigError(f"--hop must look like 20000-40000: {text!r}")
+    return int(low), int(high)
+
+
+def _run_hysteria2(
+    args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO
+) -> int:
+    action = args.action
+    if action == "enable":
+        current = state.hysteria2
+        settings = hysteria2.Hy2Settings(
+            port=args.port,
+            obfs_password=current.obfs_password if current else hysteria2.generate_secret(),
+            sni=args.sni,
+            pin_sha256=hysteria2.cert_pin(args.cert.read_text(encoding="utf-8"))
+            if args.cert
+            else "",
+            hop=_parse_hop(args.hop),
+            tuning=args.tuning,
+            cert_path=args.cert_path,
+            key_path=args.key_path,
+        )
+        save_state(state_path, state.with_hysteria2(settings))
+        out.write(f"hysteria2 enabled on udp/{settings.port} (tuning {settings.tuning})\n")
+        return 0
+    if action == "disable":
+        save_state(state_path, state.with_hysteria2(None))
+        out.write("hysteria2 disabled\n")
+        return 0
+    if action == "unit":
+        out.write(hysteria2.systemd_unit(args.unit_role, args.config_path))
+        return 0
+    settings = state.hysteria2
+    if settings is None:
+        raise ConfigError("hysteria2 is not enabled: run `shahrah hysteria2 enable` first")
+    if action == "show":
+        public = {k: v for k, v in settings.to_dict().items() if k != "obfs_password"}
+        out.write(json.dumps(public, indent=2) + "\n")
+        return 0
+    if action == "hop-rules":
+        for argv in hysteria2.hop_rules(settings, args.interface):
+            out.write(" ".join(argv) + "\n")
+        return 0
+    if action == "server":
+        text = hysteria2.render_server(settings, list(state.users))
+    else:
+        user = state.find_user(args.label) if args.label else state.users[0]
+        text = hysteria2.render_client(settings, state.public_host, user, socks_listen=args.socks)
+    if args.out:
+        write_private_file(args.out, text)
+        out.write(f"wrote {args.out}\n")
+    else:
+        out.write(text)
+    return 0
+
+
 def _run(args: argparse.Namespace) -> int:
     state_path: Path = args.state
     out = sys.stdout
@@ -979,6 +1072,12 @@ def _run(args: argparse.Namespace) -> int:
         body = args.file.read_text(encoding="utf-8") if args.file is not None else sys.stdin.read()
         report = readycheck.check_subscription(body)
         data = report.as_dict()
+        sni_checks = readycheck.check_sni_dns(body) if args.sni_dns else []
+        if args.sni_dns:
+            data["sni_dns"] = [c.as_dict() for c in sni_checks]
+            if any(not c.accepted(strict=args.strict_sni) for c in sni_checks):
+                report.ok = False
+                data["ok"] = False
         if args.json:
             out.write(json.dumps(data, indent=2) + "\n")
         else:
@@ -988,6 +1087,9 @@ def _run(args: argparse.Namespace) -> int:
                 flag = "ok" if item.ok else "NO"
                 detail = f"  {item.detail}" if item.detail else ""
                 out.write(f"  {flag} {item.name} ({item.profile}){detail}\n")
+            for c in sni_checks:
+                flag = "ok" if c.accepted(strict=args.strict_sni) else "NO"
+                out.write(f"  {flag} sni-dns {c.sni} @ {c.node_ip}: {c.verdict} {c.detail}\n")
             for note in report.notes:
                 out.write(f"note: {note}\n")
         return 0 if report.ok else 2
@@ -1305,6 +1407,9 @@ def _run(args: argparse.Namespace) -> int:
         )
         return 0
 
+    if args.command == "hysteria2":
+        return _run_hysteria2(args, state_path, state, out)
+
     if args.command == "tuning-profile":
         if args.name:
             state = state.with_tuning_profile(args.name)
@@ -1351,8 +1456,11 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "link":
         for endpoint in sorted(endpoints, key=lambda e: e.priority):
             out.write(vless_link(endpoint, user_obj) + "\n")
+        for extra in state.hysteria2_links(user_obj, args.name):
+            out.write(extra + "\n")
     elif args.command == "sub":
-        out.write(build_subscription(endpoints, user_obj) + "\n")
+        extra_links = state.hysteria2_links(user_obj, args.name)
+        out.write(build_subscription(endpoints, user_obj, extra_links=extra_links) + "\n")
     return 0
 
 
