@@ -6,7 +6,10 @@ Models two censor behaviours reported on net4people:
 * SNI/DNS mismatch (bbs#668): an allowlisted SNI sent to an IP that the name does not resolve
   to (the classic "borrowed SNI" of REALITY) is reset as well.
 
-Verdicts: ACCEPT, or REPEAT with mark 1 so the iptables rules in censor.sh reset the flow.
+Also reads the SNI out of QUIC v1 Initials (see quic.py); with --strict-udp, UDP flows whose
+first packet is not readable QUIC are dropped ("unknown protocol" policy).
+
+Verdicts: ACCEPT, or REPEAT with mark 1 so the iptables rules in censor.sh reset/drop the flow.
 """
 
 from __future__ import annotations
@@ -16,6 +19,9 @@ import socket
 import struct
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from quic import client_hello_record  # noqa: E402
 
 NETLINK_NETFILTER = 12
 NFNL_SUBSYS_QUEUE = 3
@@ -64,6 +70,28 @@ def parse_sni(payload: bytes) -> str | None:
     except (IndexError, struct.error):
         return None
     return None
+
+
+def udp_payload(ip_packet: bytes) -> tuple[str, int, bytes]:
+    """(dst_ip, dst_port, payload) of an IPv4/UDP packet; ('', 0, b'') otherwise."""
+    if len(ip_packet) < 28 or ip_packet[0] >> 4 != 4 or ip_packet[9] != 17:
+        return "", 0, b""
+    ihl = (ip_packet[0] & 0x0F) * 4
+    port = int.from_bytes(ip_packet[ihl + 2 : ihl + 4], "big")
+    return socket.inet_ntoa(ip_packet[16:20]), port, ip_packet[ihl + 8 :]
+
+
+def judge_udp(
+    payload: bytes, dst_ip: str, allow: dict[str, set[str]], strict: bool
+) -> tuple[str | None, str]:
+    """(sni, verdict) for the first packet of a UDP flow. QUIC Initials are decrypted and their
+    SNI judged like TLS; anything unreadable passes, or is dropped in strict mode (the
+    "unknown protocol" policy that hits salamander-obfuscated Hysteria2 and WireGuard)."""
+    record = client_hello_record(payload)
+    if record is None:
+        return None, "block-unknown" if strict else "pass"
+    sni = parse_sni(record)
+    return sni, decide(sni, dst_ip, allow) if sni else ("block-unknown" if strict else "pass")
 
 
 def flow_key(ip_packet: bytes) -> tuple[bytes, bytes] | None:
@@ -153,7 +181,7 @@ def _attrs(data: bytes) -> dict[int, bytes]:
     return out
 
 
-def run(queue: int, allow: dict[str, set[str]]) -> None:
+def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> None:
     sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
     sock.bind((0, 0))
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1 << 22)
@@ -174,9 +202,15 @@ def run(queue: int, allow: dict[str, set[str]]) -> None:
                 attrs = _attrs(data[pos + 20 : pos + length])
                 pkt_id = struct.unpack("!I", attrs[A_PACKET_HDR][:4])[0]
                 packet = attrs.get(A_PAYLOAD, b"")
-                dst, payload = tcp_payload(packet)
-                sni = hellos.feed(flow_key(packet), payload)
-                verdict = decide(sni, dst, allow)
+                if len(packet) > 9 and packet[9] == 17:
+                    dst, _, payload = udp_payload(packet)
+                    sni, verdict = judge_udp(payload, dst, allow, strict_udp)
+                    if verdict != "pass" and sni is None:
+                        print(f"dpi: udp -> {dst}: {verdict}", flush=True)
+                else:
+                    dst, payload = tcp_payload(packet)
+                    sni = hellos.feed(flow_key(packet), payload)
+                    verdict = decide(sni, dst, allow)
                 if sni is not None:
                     print(f"dpi: {sni} -> {dst}: {verdict}", flush=True)
                 if verdict == "pass":
@@ -192,8 +226,9 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--queue", type=int, default=7)
     ap.add_argument("--allow", type=Path, required=True)
+    ap.add_argument("--strict-udp", action="store_true")
     args = ap.parse_args()
-    run(args.queue, load_allowlist(args.allow))
+    run(args.queue, load_allowlist(args.allow), args.strict_udp)
     return 0
 
 

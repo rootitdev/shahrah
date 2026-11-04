@@ -97,3 +97,54 @@ def test_full_lab_brain_failover() -> None:
     """Brings the lab up, runs the brain failover scenario, tears it down."""
     result = subprocess.run(["bash", str(LAB / "run.sh"), "brain"], timeout=1200, check=False)
     assert result.returncode == 0
+
+
+import quic  # noqa: E402
+
+
+def _quic_initial(dcid: bytes, handshake: bytes) -> bytes:
+    """A client QUIC v1 Initial carrying ``handshake`` in one CRYPTO frame (RFC 9001 sec. 5)."""
+    key, iv, hp = quic.initial_keys(dcid)
+    frame = b"\x06\x00" + (0x4000 | len(handshake)).to_bytes(2, "big") + handshake
+    plain = frame + b"\x00" * max(0, 1162 - len(frame))
+    pn = b"\x02"
+    length = len(pn) + len(plain) + 16
+    head = (
+        b"\xc0\x00\x00\x00\x01"
+        + bytes([len(dcid)])
+        + dcid
+        + b"\x00"
+        + b"\x00"
+        + (0x4000 | length).to_bytes(2, "big")
+    )
+    nonce = bytes(a ^ b for a, b in zip(iv, pn.rjust(12, b"\0"), strict=True))
+    body = quic.aes128_ctr(key, nonce + b"\x00\x00\x00\x02", plain) + b"\x00" * 16
+    packet = bytearray(head + pn + body)
+    mask = quic.aes128_encrypt_block(hp, bytes(packet[len(head) + 4 : len(head) + 20]))
+    packet[0] ^= mask[0] & 0x0F
+    packet[len(head)] ^= mask[1]
+    return bytes(packet)
+
+
+def test_aes_and_quic_initial_keys_match_published_vectors() -> None:
+    fips = quic.aes128_encrypt_block(
+        bytes.fromhex("000102030405060708090a0b0c0d0e0f"),
+        bytes.fromhex("00112233445566778899aabbccddeeff"),
+    )
+    assert fips.hex() == "69c4e0d86a7b0430d8cdb78070b4c55a"  # FIPS-197 C.1
+    key, iv, hp = quic.initial_keys(bytes.fromhex("8394c8f03e515708"))  # RFC 9001 A.1
+    assert key.hex() == "1f369613dd76d5467730efcbe3b1a22d"
+    assert iv.hex() == "fa044b2f42a3fd3b46fb255c"
+    assert hp.hex() == "9f50449e04a0e810283a1e9933adedd2"
+    sample = bytes.fromhex("d1b1c98dd7689fb8ec11d242b123dc9b")  # RFC 9001 A.2
+    assert quic.aes128_encrypt_block(hp, sample)[:5].hex() == "437b9aec36"
+
+
+def test_dpi_reads_sni_from_quic_initial_and_strict_mode_drops_opaque_udp() -> None:
+    handshake = _client_hello("exit.lab")[5:]
+    packet = _quic_initial(bytes.fromhex("8394c8f03e515708"), handshake)
+    assert dpi.parse_sni(quic.client_hello_record(packet) or b"") == "exit.lab"
+    assert dpi.judge_udp(packet, "10.0.4.2", ALLOW, strict=False) == ("exit.lab", "block-sni")
+    opaque = bytes(range(256)) * 5  # salamander-obfuscated Hysteria2 looks like this
+    assert dpi.judge_udp(opaque, "10.0.4.2", ALLOW, strict=False) == (None, "pass")
+    assert dpi.judge_udp(opaque, "10.0.4.2", ALLOW, strict=True) == (None, "block-unknown")
