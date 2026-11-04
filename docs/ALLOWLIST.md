@@ -99,6 +99,12 @@ WaterWall Reality session to a cover site; non-peers are forwarded to that site,
 tunnel listener only accepts the peer IP. `reverse` mode (default) keeps warm connections
 from exit to relay, saving an international handshake on every new Instagram burst.
 
+Pick `--cover-sni` for the side that runs WaterWall's RealityServer (the **Iran relay** in
+reverse mode, the exit in direct mode): it is contacted for every handshake. Measured from
+an Iranian home line (WSL smoke, 2026-11-04): `www.speedtest.net` took ~6.5 s to connect, so
+direct mode's per-connection handshake timed out while reverse mode (warm pool) passed.
+Prefer a cover that is fast and allowlisted from the RealityServer's network.
+
 ## 7. paqet as an Oracle path
 
 `brain` sidecars (`"sidecars": [{"name": "rescue", "kind": "paqet", "socks_port": 1080}]`)

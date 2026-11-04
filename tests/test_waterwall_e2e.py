@@ -61,7 +61,7 @@ def _fetch(port: int, attempts: int = 2) -> bytes | None:
     # internet, so allow one retry for a network hiccup.
     for _ in range(attempts):
         try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=6) as r:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=15) as r:
                 return r.read()
         except OSError:
             time.sleep(0.5)

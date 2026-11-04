@@ -19,6 +19,9 @@ Modes:
   international RTT saved per Instagram request burst).
 * ``direct`` - Iran dials the exit (simpler; use when Iran inbound from abroad is filtered).
 
+``cover_sni`` is dialled by the RealityServer side (Iran in reverse mode) on every leg
+handshake, so it must be fast from that network; a slow cover makes direct mode time out.
+
 The tunnel listener only accepts the peer's address (``whitelist``): the ops logs showed the
 backhaul port being found and hammered when left open to everyone (docs/DIAG_LESSONS.md).
 """
