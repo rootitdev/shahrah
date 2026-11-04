@@ -31,7 +31,7 @@ NLM_F_REQUEST, NLM_F_ACK = 1, 4
 CFG_CMD, CFG_PARAMS = 1, 2
 CMD_BIND = 1
 A_PACKET_HDR, A_VERDICT_HDR, A_MARK, A_PAYLOAD = 1, 2, 3, 10
-NF_ACCEPT, NF_REPEAT = 1, 4
+NF_DROP, NF_ACCEPT, NF_REPEAT = 0, 1, 4
 DUMP_DIR = Path(os.environ["DPI_DUMP"]) if os.environ.get("DPI_DUMP") else None
 
 
@@ -105,8 +105,8 @@ def judge_udp(
 
 
 def flow_key(ip_packet: bytes) -> tuple[bytes, bytes] | None:
-    """(src ip+port, dst ip+port) of an IPv4/TCP packet, for per-flow reassembly."""
-    if len(ip_packet) < 20 or ip_packet[9] != 6:
+    """(src ip+port, dst ip+port) of an IPv4 TCP/UDP packet, for per-flow state."""
+    if len(ip_packet) < 20 or ip_packet[9] not in (6, 17):
         return None
     ihl = (ip_packet[0] & 0x0F) * 4
     return ip_packet[12:16] + ip_packet[ihl : ihl + 2], ip_packet[16:20] + ip_packet[
@@ -202,6 +202,8 @@ def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> Non
     print(f"dpi: bound to queue {queue}, allowlist {sorted(allow)}", flush=True)
     hellos = HelloReassembler()
     initials = InitialReassembler()
+    udp_seen: set[tuple[bytes, bytes]] = set()
+    udp_blocked: set[tuple[bytes, bytes]] = set()
     while True:
         data = sock.recv(1 << 17)
         pos = 0
@@ -214,8 +216,27 @@ def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> Non
                 pkt_id = struct.unpack("!I", attrs[A_PACKET_HDR][:4])[0]
                 packet = attrs.get(A_PAYLOAD, b"")
                 if len(packet) > 9 and packet[9] == 17:
+                    # UDP: every packet comes here, the DPI keeps the per-flow verdict itself
+                    # (conntrack marks did not stick for UDP flows in the lab kernel).
+                    key = flow_key(packet)
+                    if key in udp_blocked:
+                        sock.send(
+                            _msg(
+                                MSG_VERDICT,
+                                queue,
+                                _attr(A_VERDICT_HDR, struct.pack("!II", NF_DROP, pkt_id)),
+                            )
+                        )
+                        pos += (length + 3) & ~3
+                        continue
                     dst, _, payload = udp_payload(packet)
-                    sni, verdict = judge_udp(payload, dst, allow, strict_udp, initials)
+                    first = key not in udp_seen
+                    udp_seen.add(key)
+                    sni, verdict = judge_udp(payload, dst, allow, strict_udp and first, initials)
+                    if verdict != "pass":
+                        udp_blocked.add(key)
+                    if len(udp_seen) > 65536:
+                        udp_seen.clear()
                     if DUMP_DIR is not None and len(list(DUMP_DIR.glob("udp-*.bin"))) < 8:
                         (DUMP_DIR / f"udp-{pkt_id}.bin").write_bytes(payload)
                     if verdict != "pass" and sni is None:
