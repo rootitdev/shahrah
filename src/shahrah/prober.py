@@ -16,7 +16,7 @@ import ssl
 import subprocess
 import tempfile
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -52,6 +52,68 @@ class ProbeResult:
 
     def to_oracle_probe(self) -> Probe:
         return Probe(path=self.endpoint, ok=self.ok, latency_ms=self.latency_ms)
+
+
+# Reachability through the tunnel: any HTTP answer proves the path; a censored path fails at
+# TCP/TLS level instead. Front pages may redirect, 4xx is fine for bare CDN hosts.
+ANY_HTTP = frozenset(range(200, 500))
+
+
+@dataclass(frozen=True, slots=True)
+class WeightedTarget:
+    target: ProbeTarget
+    weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        if self.weight <= 0:
+            raise ValueError("weight must be positive")
+
+
+# Instagram-first quality probe (project goal: social apps over bulk speed). The app talks to
+# its API host and fetches media from the cdninstagram CDN; www is the web front. A generic
+# 204 target keeps one non-Meta signal so a Meta-side incident is not read as a dead path.
+INSTAGRAM_TARGETS: tuple[WeightedTarget, ...] = (
+    WeightedTarget(ProbeTarget("i.instagram.com", path="/", expect_status=ANY_HTTP), 3.0),
+    WeightedTarget(ProbeTarget("static.cdninstagram.com", path="/", expect_status=ANY_HTTP), 2.0),
+    WeightedTarget(ProbeTarget("www.instagram.com", path="/", expect_status=ANY_HTTP), 2.0),
+    WeightedTarget(ProbeTarget(), 1.0),
+)
+
+
+def social_quality(
+    name: str,
+    results: Sequence[tuple[float, ProbeResult]],
+    *,
+    min_score: float = 0.75,
+) -> ProbeResult:
+    """Fold weighted per-target results into one Oracle-ready result for path ``name``.
+
+    ``ok`` when the weighted success share reaches ``min_score``; latency is the weighted mean
+    over successful targets, so a path that is slow on Instagram ranks behind a snappier one.
+    """
+    if not results:
+        raise ValueError("no results to aggregate")
+    if not 0 < min_score <= 1:
+        raise ValueError("min_score must be in (0, 1]")
+    total = sum(weight for weight, _ in results)
+    good = [(w, r) for w, r in results if r.ok and r.latency_ms is not None]
+    score = sum(w for w, _ in good) / total
+    if score + 1e-9 < min_score or not good:
+        failed = ",".join(r.detail or "fail" for _, r in results if not r.ok)[:120]
+        return ProbeResult(name, False, None, f"social score {score:.2f}: {failed}")
+    latency = sum(w * (r.latency_ms or 0.0) for w, r in good) / sum(w for w, _ in good)
+    return ProbeResult(name, True, round(latency, 1), f"social score {score:.2f}")
+
+
+def probe_weighted(
+    name: str,
+    probe: Callable[[ProbeTarget], ProbeResult],
+    targets: Sequence[WeightedTarget] = INSTAGRAM_TARGETS,
+    *,
+    min_score: float = 0.75,
+) -> ProbeResult:
+    """Run ``probe`` against every target and aggregate with :func:`social_quality`."""
+    return social_quality(name, [(t.weight, probe(t.target)) for t in targets], min_score=min_score)
 
 
 def _recv_exact(sock: socket.socket, count: int) -> bytes:

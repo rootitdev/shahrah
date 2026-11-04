@@ -40,7 +40,7 @@ from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
 from .panel import PanelClient, PanelError, sync
-from .prober import ProbeError, ProbeResult, ProbeTarget, XrayProbeSession
+from .prober import ProbeError, ProbeResult, ProbeTarget, XrayProbeSession, probe_weighted
 from .roles import brain_role, sales_manager_role
 from .state import NodeState, load_state, save_state, write_private_file
 from .xray_config import dumps, render_server_config
@@ -109,6 +109,16 @@ def _build_parser() -> argparse.ArgumentParser:
     brain.add_argument("--xray-bin", default="xray")
     brain.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
     brain.add_argument("--once", action="store_true", help="run a single cycle and exit")
+    brain.add_argument(
+        "--social-probe",
+        action="store_true",
+        help="judge paths by weighted Instagram reachability/latency instead of one 204 URL",
+    )
+    brain.add_argument(
+        "--paqet-unit",
+        default="",
+        help="systemd unit of the paqet client to start in restricted/outage mode",
+    )
     brain.add_argument(
         "--control-report",
         default=os.environ.get("SHAHRAH_CONTROL_REPORT", ""),
@@ -420,6 +430,12 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="signed tactics envelope (tactics-sign) served at /<secret>/<label>/tactics",
     )
+
+    tprof = sub.add_parser(
+        "tuning-profile",
+        help="pick an Xray tuning preset (social = many short flows, Instagram first)",
+    )
+    tprof.add_argument("name", nargs="?", help="default or social (omit to show)")
 
     pq = sub.add_parser(
         "paqet-config",
@@ -751,6 +767,12 @@ def _run_brain(args: argparse.Namespace) -> int:
             if session is None:
                 session = XrayProbeSession(args.xray_bin, config.endpoints, config.probe_user)
                 session.start()
+            if args.social_probe:
+                live = session
+                return [
+                    probe_weighted(ep.name, lambda t, n=ep.name: live.probe(n, 10.0, target=t))
+                    for ep in config.endpoints
+                ]
             return session.probe_all()
         except (ProbeError, OSError) as exc:
             if session is not None:
@@ -779,6 +801,7 @@ def _run_brain(args: argparse.Namespace) -> int:
         control_source=control_source,
         on_burn=on_burn,
         report_sink=report_sink,
+        on_mode_change=paqet.crisis_hook(args.paqet_unit) if args.paqet_unit else None,
     )
     try:
         if args.once:
@@ -1277,6 +1300,13 @@ def _run(args: argparse.Namespace) -> int:
             port=port,
             tactics_path=args.tactics,
         )
+        return 0
+
+    if args.command == "tuning-profile":
+        if args.name:
+            state = state.with_tuning_profile(args.name)
+            save_state(state_path, state)
+        out.write(f"tuning_profile -> {state.tuning_profile} (run `shahrah apply` to render)\n")
         return 0
 
     if args.command == "apply":

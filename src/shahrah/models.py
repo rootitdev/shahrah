@@ -141,8 +141,23 @@ class Tuning:
     buffer_size_kb: int = 128
     tcp_keepalive_idle_s: int = 30
     tcp_keepalive_interval_s: int = 15
+    # Social-quality knobs (Xray docs: config/transports/sockopt.md, config/policy.md). All
+    # default to "not emitted" so the default config is byte-identical to before.
+    tcp_fast_open: bool = False  # sockopt.tcpFastOpen; kernel side: tcp_fastopen=3 (sysctl)
+    tcp_congestion: str = ""  # sockopt.tcpcongestion (Linux); docs recommend bbr
+    tcp_user_timeout_ms: int = 0  # sockopt.tcpUserTimeout; 0 = OS default
+    uplink_only_s: int | None = None  # policy.uplinkOnly; docs: 0 helps HTTP browsing
+    downlink_only_s: int | None = None  # policy.downlinkOnly
 
     def __post_init__(self) -> None:
+        if self.tcp_congestion not in {"", "bbr", "cubic", "reno"}:
+            raise ConfigError(f"tcp_congestion must be bbr/cubic/reno: {self.tcp_congestion!r}")
+        if self.tcp_user_timeout_ms != 0 and not 1000 <= self.tcp_user_timeout_ms <= 120000:
+            raise ConfigError("tcp_user_timeout_ms must be 0 or 1000..120000")
+        for name in ("uplink_only_s", "downlink_only_s"):
+            value = getattr(self, name)
+            if value is not None and (not isinstance(value, int) or not 0 <= value <= 30):
+                raise ConfigError(f"{name} must be None or an integer in 0..30")
         if not self.dns_servers:
             raise ConfigError("at least one DNS server is required")
         for server in self.dns_servers:
@@ -159,6 +174,26 @@ class Tuning:
             value = getattr(self, name)
             if not isinstance(value, int) or isinstance(value, bool) or not low <= value <= high:
                 raise ConfigError(f"{name} must be an integer in {low}..{high}: {value!r}")
+
+
+# Named tuning presets. "social" favours many short, latency-sensitive flows (Instagram feed,
+# image/video thumbnails, DMs) over bulk throughput; every knob is documented by Xray:
+# * uplinkOnly/downlinkOnly 0: policy.md says 0 "improves connection closing efficiency" for
+#   HTTP browsing, freeing slots quickly when apps open and close many requests;
+# * tcpFastOpen: saves one RTT on repeat connects where both sides support TFO;
+# * tcpcongestion bbr: sockopt.md's recommendation; tolerant of lossy international links;
+# * tcpUserTimeout 10 s (the docs' example): drop flows whose peer vanished (mobile handover)
+#   instead of letting them stall until keepalive gives up.
+TUNING_PROFILES: dict[str, Tuning] = {
+    "default": Tuning(),
+    "social": Tuning(
+        tcp_fast_open=True,
+        tcp_congestion="bbr",
+        tcp_user_timeout_ms=10000,
+        uplink_only_s=0,
+        downlink_only_s=0,
+    ),
+}
 
 
 # Ports that stay reachable when Iran drops to an allowlist-style shutdown (TCP only).

@@ -49,10 +49,30 @@ def _client(user: User, profile: Profile) -> dict[str, Any]:
 
 
 def _sockopt(tuning: Tuning) -> dict[str, Any]:
-    return {
+    opts: dict[str, Any] = {
         "tcpKeepAliveIdle": tuning.tcp_keepalive_idle_s,
         "tcpKeepAliveInterval": tuning.tcp_keepalive_interval_s,
     }
+    if tuning.tcp_fast_open:
+        opts["tcpFastOpen"] = True
+    if tuning.tcp_congestion:
+        opts["tcpcongestion"] = tuning.tcp_congestion
+    if tuning.tcp_user_timeout_ms:
+        opts["tcpUserTimeout"] = tuning.tcp_user_timeout_ms
+    return opts
+
+
+def _policy_level(tuning: Tuning) -> dict[str, Any]:
+    level: dict[str, Any] = {
+        "handshake": tuning.handshake_s,
+        "connIdle": tuning.conn_idle_s,
+        "bufferSize": tuning.buffer_size_kb,
+    }
+    if tuning.uplink_only_s is not None:
+        level["uplinkOnly"] = tuning.uplink_only_s
+    if tuning.downlink_only_s is not None:
+        level["downlinkOnly"] = tuning.downlink_only_s
+    return level
 
 
 def _stream_settings(server: ServerSettings, listener: Listener) -> dict[str, Any]:
@@ -136,15 +156,7 @@ def render_server_config(
         ],
         "routing": {"domainStrategy": "AsIs", "rules": rules},
         "dns": {"servers": list(server.tuning.dns_servers), "queryStrategy": "UseIPv4"},
-        "policy": {
-            "levels": {
-                "0": {
-                    "handshake": server.tuning.handshake_s,
-                    "connIdle": server.tuning.conn_idle_s,
-                    "bufferSize": server.tuning.buffer_size_kb,
-                }
-            }
-        },
+        "policy": {"levels": {"0": _policy_level(server.tuning)}},
     }
 
     if server.stats_api_port is not None:

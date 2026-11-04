@@ -18,6 +18,7 @@ from . import keys
 from .models import (
     CRISIS_PORTS,
     RISKY_TARGET_SUFFIXES,
+    TUNING_PROFILES,
     ConfigError,
     Endpoint,
     Listener,
@@ -49,12 +50,15 @@ class NodeState:
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False
     access_log: str | None = None
+    tuning_profile: str = "default"  # key of models.TUNING_PROFILES
     stats_api_port: int | None = None  # loopback StatsService; None = disabled
     users: tuple[User, ...] = field(default_factory=tuple)
     extra_listeners: tuple[Listener, ...] = ()
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
+        if self.tuning_profile not in TUNING_PROFILES:
+            raise ConfigError(f"unknown tuning profile {self.tuning_profile!r}")
         if keys.public_from_private(self.private_key) != self.public_key:
             raise ConfigError("REALITY public key does not match the private key")
         labels = [user.label for user in self.users]
@@ -111,7 +115,13 @@ class NodeState:
             stats_api_port=resolved,
             access_log=self.access_log,
             extra_listeners=self.extra_listeners,
+            tuning=TUNING_PROFILES[self.tuning_profile],
         )
+
+    def with_tuning_profile(self, name: str) -> NodeState:
+        if name not in TUNING_PROFILES:
+            raise ConfigError(f"unknown tuning profile {name!r}: {sorted(TUNING_PROFILES)}")
+        return replace(self, tuning_profile=name)
 
     def with_access_log(self, path: str | None) -> NodeState:
         """Enable or disable the Xray access log (required for SNI watch)."""
@@ -232,6 +242,7 @@ class NodeState:
             "port": self.port,
             "allow_non_443": self.allow_non_443,
             "access_log": self.access_log,
+            "tuning_profile": self.tuning_profile,
             "stats_api_port": self.stats_api_port,
             "xhttp_path": self.xhttp_path,
             "xhttp_mode": self.xhttp_mode,
@@ -267,6 +278,7 @@ class NodeState:
                 port=data["port"],
                 allow_non_443=data["allow_non_443"],
                 access_log=data.get("access_log"),
+                tuning_profile=data.get("tuning_profile", "default"),
                 stats_api_port=data.get("stats_api_port"),
                 xhttp_path=data["xhttp_path"],
                 xhttp_mode=data["xhttp_mode"],
