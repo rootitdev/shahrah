@@ -182,3 +182,18 @@ Details and operator steps: [ALLOWLIST.md](ALLOWLIST.md).
 * `paqet` — raw-packet KCP crisis path as a pinned external binary (`install.sh --with-paqet`).
 * Social quality — `Tuning` preset `social` and `brain --social-probe` (weighted Instagram
   targets folded into one Oracle probe).
+
+## Phase 2 data planes
+
+All external, pinned by sha256 in `install.sh` and in the Python module, never vendored:
+
+| Plane | Module | Role | Oracle path |
+|---|---|---|---|
+| Xray (REALITY Vision/XHTTP, CDN XHTTP) | `xray_config` | user entry | endpoints |
+| Hysteria2 (MIT) | `hysteria2` | QUIC/UDP social path, salamander, port hopping | sidecar `hysteria2` (ordinary) |
+| WaterWall (MPL-2.0) | `waterwall` | Iran relay ↔ exit backhaul (reverse/direct, Reality leg) | — (transport under the endpoints) |
+| paqet (MIT, alpha) | `paqet` | raw-packet rescue | sidecar `paqet` (lockdown-capable, on demand) |
+
+Sidecars are probed through their local client's loopback SOCKS port (`prober.probe_socks`).
+`shahrah node-check` turns the recurring failures from the manual ops logs into read-only
+checks (see DIAG_LESSONS.md).

@@ -72,7 +72,41 @@ but hurts video/downloads, so test it only on XHTTP/CDN profiles.
 `www.instagram.com` (w=2) and a generic 204 URL (w=1) per path; the path is healthy at a
 weighted score ≥ 0.75 and ranked by weighted latency.
 
+## 5. Hysteria2 (QUIC/UDP) social path — phase 2
+
+`install.sh --host ... --with-hysteria2 8443 [--hy2-hop 20000-40000]` installs the pinned
+Hysteria (`app/v2.13.0`, MIT, sha256 verified), a self-signed certificate, and a server with
+**Salamander** obfuscation (packets look like random UDP, not QUIC). Clients pin the leaf
+certificate (`pinSHA256`), so no CA or domain is needed. Per-user auth is `label:uuid`.
+
+* Social preset: QUIC windows 2–4 MiB/stream, 5–10 MiB/conn (Hysteria's default is larger;
+  smaller windows = less queueing delay), keep-alive 10 s for carrier NAT, and a declared
+  10/50 Mbit/s per client so Brutal does not blast lossy mobile links. `--tuning bulk` keeps
+  the upstream defaults and uses BBR.
+* Port hopping: an iptables `REDIRECT` from the hop range to the listen port; clients rotate
+  every 30 s, which defeats per-port UDP throttling.
+* Ordering: subscription lists REALITY/TCP first and `hysteria2://` last; the brain treats it
+  as an *ordinary* path (`Sidecar(kind="hysteria2")`) — UDP is the first thing an allowlist
+  kills, so it never counts as lockdown-capable.
+
+## 6. WaterWall backhaul (Iran relay → exit) — phase 2
+
+`install.sh --role relay --ww-peer <exit ip>` on the Iran server and
+`install.sh --host ... --with-waterwall exit --ww-peer <iran ip>` on the exit (copy
+`/etc/shahrah/backhaul.key` between them). Users keep their exit REALITY links but dial the
+relay IP. The relay does not decrypt user traffic and runs no panel (bbs#675). The leg is a
+WaterWall Reality session to a cover site; non-peers are forwarded to that site, and the
+tunnel listener only accepts the peer IP. `reverse` mode (default) keeps warm connections
+from exit to relay, saving an international handshake on every new Instagram burst.
+
+## 7. paqet as an Oracle path
+
+`brain` sidecars (`"sidecars": [{"name": "rescue", "kind": "paqet", "socks_port": 1080}]`)
+make paqet a real path: lockdown-capable, and *on demand* — it only exists while the mode is
+restricted/outage (when `--paqet-unit` has started the client), so a stopped client never
+marks the system degraded.
+
 ## Not done yet
 
 Field validation from Iranian ASNs; real ASN→profile data; per-client derived tactics keys;
-domestic relay provisioning (phase 2: WaterWall backhaul); paqet as a first-class Oracle path.
+Hysteria2/WaterWall/paqet on real servers (loopback smoke only so far).
