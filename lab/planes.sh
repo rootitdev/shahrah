@@ -57,7 +57,7 @@ up() {
   bg censor dnsd python3 "$HERE/dnsd.py" 10.0.1.1
 
   # exit node: REALITY Vision 443 + REALITY XHTTP 80, Hysteria2 udp/8443 (salamander, pinned)
-  $SH init --host 10.0.4.2 --target cover.lab --extra-listener 80:reality-xhttp \
+  $SH init --host 10.0.4.2 --target cover.lab --allow-non-443 --extra-listener 80:reality-xhttp \
     --extra-listener "8080:cdn-xhttp:cdn.lab:/$(openssl rand -hex 12)" >/dev/null
   $SH user add probe >/dev/null
   $SH hysteria2 enable --port 8443 --sni exit.lab --cert "$RUN/hy2.crt" \
