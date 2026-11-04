@@ -27,6 +27,7 @@ from . import (
     keys,
     leakcheck,
     loadtest,
+    nodecheck,
     ops,
     paqet,
     provision,
@@ -492,6 +493,15 @@ def _build_parser() -> argparse.ArgumentParser:
     hy.add_argument("--unit-role", choices=["server", "client"], default="server")
     hy.add_argument("--config-path", default="/etc/shahrah/hysteria2.yaml")
     hy.add_argument("--out", type=Path, help="write the config here (mode 0600)")
+
+    nc = sub.add_parser(
+        "node-check",
+        help="read-only node readiness checks learned from past outages (DIAG_LESSONS.md)",
+    )
+    nc.add_argument("--cert", type=Path, help="PEM whose pin to verify (with --pin)")
+    nc.add_argument("--pin", default="", help="sha256 pin clients use (hex)")
+    nc.add_argument("--no-target", action="store_true", help="skip the REALITY target probe")
+    nc.add_argument("--json", action="store_true")
 
     wwp = sub.add_parser(
         "waterwall-config",
@@ -1476,6 +1486,25 @@ def _run(args: argparse.Namespace) -> int:
             tactics_path=args.tactics,
         )
         return 0
+
+    if args.command == "node-check":
+        ports = [item.port for item in state.server_settings().listeners()]
+        if state.hysteria2 is not None:
+            ports.append(state.hysteria2.port)
+        checks = nodecheck.run_all(
+            reality_host=None if args.no_target else state.target_host,
+            public_ports=ports,
+            cert_pem=args.cert.read_text(encoding="utf-8") if args.cert else None,
+            pin=args.pin or (state.hysteria2.pin_sha256 if state.hysteria2 else ""),
+        )
+        failed = any(c.status == "fail" for c in checks)
+        if args.json:
+            out.write(json.dumps([c.as_dict() for c in checks], indent=2) + "\n")
+        else:
+            out.write(f"node-check {'FAIL' if failed else 'PASS'}\n")
+            for c in checks:
+                out.write(f"  {c.status:4} {c.name}  {c.detail}\n")
+        return 2 if failed else 0
 
     if args.command == "hysteria2":
         return _run_hysteria2(args, state_path, state, out)

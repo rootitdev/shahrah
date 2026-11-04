@@ -27,6 +27,13 @@ from .oracle import Probe
 from .xray_client import LOOPBACK, render_probe_config
 from .xray_config import dumps
 
+# A browser-like User-Agent: some CDNs/WAFs answer odd UAs with 403/challenge pages, which
+# made health checks report healthy paths as down (docs/DIAG_LESSONS.md).
+PROBE_USER_AGENT = (
+    "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/130.0 Mobile Safari/537.36"
+)
+
 
 class ProbeError(RuntimeError):
     """The probe machinery itself failed (not the endpoint under test)."""
@@ -165,7 +172,7 @@ def http_status_via_socks(proxy_port: int, target: ProbeTarget, timeout: float) 
             stream = context.wrap_socket(sock, server_hostname=target.host)
         request = (
             f"GET {target.path} HTTP/1.1\r\nHost: {target.host}\r\n"
-            "User-Agent: shahrah-probe\r\nConnection: close\r\n\r\n"
+            f"User-Agent: {PROBE_USER_AGENT}\r\nConnection: close\r\n\r\n"
         )
         stream.sendall(request.encode("ascii"))
         buffer = b""

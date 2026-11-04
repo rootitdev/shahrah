@@ -180,5 +180,7 @@ net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_fastopen = 3
 net.ipv4.tcp_slow_start_after_idle = 0
+# PMTU black holes on tunnelled/mobile paths stall big TLS records (feed images)
+net.ipv4.tcp_mtu_probing = 1
 fs.file-max = 2097152
 """
