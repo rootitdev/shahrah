@@ -15,6 +15,12 @@ PINNED_VERSION="v26.10.21"
 PINNED_SHA256_AMD64="0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978"
 PINNED_SHA256_ARM64="d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c"
 
+# paqet raw-packet crisis path (MIT, https://github.com/hanselime/paqet); opt-in, see
+# docs/ALLOWLIST.md. Digests from the GitHub release assets.
+PAQET_VERSION="v1.0.0-alpha.21"
+PAQET_SHA256_AMD64="4f2f69e0493746726598485ef18df43372470a1514f8021594137e522f0f4fc7"
+PAQET_SHA256_ARM64="be5c7b35a0a93832063e1dc7fddeb76d4597fb9de76abdfdf7b8574b775e3885"
+
 APP_DIR="/opt/shahrah"
 CONF_DIR="/etc/shahrah"
 SERVICE_USER="shahrah"
@@ -29,6 +35,8 @@ PORT="443"
 SSH_PORT=""
 EXTRA_LISTENERS=()
 FIREWALL=1
+WITH_PAQET=0
+PAQET_PORT="9999"
 WORK_DIR=""
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 
@@ -50,6 +58,7 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --multi-port      preset: also listen on 80 and 53 with reality-xhttp (443 + 80 + 53)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
+  --with-paqet PORT also run a paqet server (raw-packet crisis path) on PORT (not 80/443)
   -h, --help        show this help
 EOF
 }
@@ -66,6 +75,7 @@ parse_args() {
       --multi-port) EXTRA_LISTENERS+=("80:reality-xhttp" "53:reality-xhttp"); shift ;;
       --ssh-port) SSH_PORT="${2:?--ssh-port needs a value}"; shift 2 ;;
       --no-firewall) FIREWALL=0; shift ;;
+      --with-paqet) WITH_PAQET=1; PAQET_PORT="${2:?--with-paqet needs a PORT}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) usage >&2; die "unknown option: $1" ;;
     esac
@@ -147,6 +157,45 @@ install_xray() {
   unzip -q -o "$WORK_DIR/$asset" xray -d "$WORK_DIR"
   install -m 0755 "$WORK_DIR/xray" /usr/local/bin/xray
   log "installed $(/usr/local/bin/xray version | head -n 1)"
+}
+
+install_paqet() {
+  local arch expected actual iface ip gw mac dir
+  case "$(uname -m)" in
+    x86_64|amd64) arch="amd64"; expected="$PAQET_SHA256_AMD64" ;;
+    aarch64|arm64) arch="arm64"; expected="$PAQET_SHA256_ARM64" ;;
+    *) die "paqet: unsupported architecture: $(uname -m)" ;;
+  esac
+  case "$PAQET_PORT" in 80|443|53) die "paqet must not use port ${PAQET_PORT}" ;; esac
+  dir="$(mktemp -d)"
+  log "downloading paqet ${PAQET_VERSION}"
+  curl -fsSL --retry 3 -o "$dir/paqet.tgz" \
+    "https://github.com/hanselime/paqet/releases/download/${PAQET_VERSION}/paqet-linux-${arch}-${PAQET_VERSION}.tar.gz"
+  actual="$(sha256sum "$dir/paqet.tgz" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || die "checksum mismatch for paqet (expected $expected, got $actual)"
+  tar -xzf "$dir/paqet.tgz" -C "$dir" "paqet_linux_${arch}"
+  install -m 0755 "$dir/paqet_linux_${arch}" /usr/local/bin/paqet
+  rm -rf "$dir"
+
+  iface="$(ip -4 route show default | awk '{print $5; exit}')"
+  gw="$(ip -4 route show default | awk '{print $3; exit}')"
+  ip="$(ip -4 -o addr show dev "$iface" | awk '{split($4,a,"/"); print a[1]; exit}')"
+  ping -c1 -W1 "$gw" >/dev/null 2>&1 || true
+  mac="$(ip neigh show "$gw" | awk '{for(i=1;i<=NF;i++) if($i=="lladdr") print $(i+1); exit}')"
+  [[ -n "$iface" && -n "$ip" && -n "$mac" ]] || die "paqet: cannot detect interface/ip/gateway MAC"
+  shahrah paqet-config server --interface "$iface" --ip "$ip" --router-mac "$mac" \
+    --port "$PAQET_PORT" --key-file "$CONF_DIR/paqet.key" --out "$CONF_DIR/paqet.yaml"
+  local line
+  while IFS= read -r line; do
+    # idempotent: only append a rule that is not there yet (-C checks, -A appends)
+    # shellcheck disable=SC2086
+    ${line/ -A / -C } >/dev/null 2>&1 || $line
+  done < <(shahrah paqet-config firewall --port "$PAQET_PORT")
+  shahrah paqet-config unit --unit-role server --config-path "$CONF_DIR/paqet.yaml" \
+    > /etc/systemd/system/shahrah-paqet.service
+  systemctl daemon-reload
+  systemctl enable --now shahrah-paqet >/dev/null
+  log "paqet server on :${PAQET_PORT} (key: ${CONF_DIR}/paqet.key, copy it to the Iran relay)"
 }
 
 install_app() {
@@ -289,6 +338,7 @@ main() {
   init_node
   install_service
   setup_firewall
+  [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
 
   log "done. Client link for user 'first' (keep it private):"
   shahrah --state "$CONF_DIR/state.json" link first

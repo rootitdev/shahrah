@@ -120,6 +120,27 @@ def http_status_via_socks(proxy_port: int, target: ProbeTarget, timeout: float) 
         sock.close()
 
 
+def probe_socks(
+    name: str,
+    socks_port: int,
+    target: ProbeTarget | None = None,
+    timeout: float = 8.0,
+) -> ProbeResult:
+    """Probe a path exposed as a loopback SOCKS5 proxy by another data plane (e.g. the paqet
+    client). Same semantics as :meth:`XrayProbeSession.probe`; never raises for path failures.
+    """
+    dest = target or ProbeTarget()
+    started = time.monotonic()
+    try:
+        status = http_status_via_socks(socks_port, dest, timeout)
+    except (OSError, ConnectionError, ssl.SSLError, UnicodeError) as exc:
+        return ProbeResult(name, False, None, f"{type(exc).__name__}: {exc}"[:160])
+    elapsed = (time.monotonic() - started) * 1000
+    if status in dest.expect_status:
+        return ProbeResult(name, True, round(elapsed, 1))
+    return ProbeResult(name, False, None, f"unexpected HTTP status {status}")
+
+
 def _free_ports(count: int) -> list[int]:
     sockets = [socket.socket() for _ in range(count)]
     try:

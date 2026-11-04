@@ -25,6 +25,7 @@ from . import (
     leakcheck,
     loadtest,
     ops,
+    paqet,
     provision,
     readycheck,
     settle,
@@ -419,6 +420,21 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="signed tactics envelope (tactics-sign) served at /<secret>/<label>/tactics",
     )
+
+    pq = sub.add_parser(
+        "paqet-config",
+        help="render a paqet (raw-packet crisis path) server/client config, or its iptables",
+    )
+    pq.add_argument("role", choices=["server", "client", "firewall", "unit"])
+    pq.add_argument("--interface", default="eth0")
+    pq.add_argument("--ip", help="this host's IPv4 on --interface")
+    pq.add_argument("--router-mac", default="")
+    pq.add_argument("--server-ip", help="client: paqet server IPv4")
+    pq.add_argument("--port", type=int, default=9999)
+    pq.add_argument("--key-file", type=Path, help="shared KCP key (created if missing)")
+    pq.add_argument("--unit-role", choices=["server", "client"], default="server")
+    pq.add_argument("--config-path", default="/etc/shahrah/paqet.yaml")
+    pq.add_argument("--out", type=Path, help="write the config here (mode 0600)")
 
     tsign = sub.add_parser(
         "tactics-sign",
@@ -991,6 +1007,37 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "settle-hook" and args.print_secret:
         out.write(secrets.token_urlsafe(32) + "\n")
+        return 0
+
+    if args.command == "paqet-config":
+        if args.role == "firewall":
+            for argv in paqet.server_firewall_rules(args.port):
+                out.write(" ".join(argv) + "\n")
+            return 0
+        if args.role == "unit":
+            out.write(paqet.systemd_unit(args.unit_role, args.config_path))
+            return 0
+        if args.key_file is None or not args.ip:
+            raise ConfigError("--ip and --key-file are required")
+        if not args.key_file.exists():
+            write_private_file(args.key_file, paqet.generate_key() + "\n")
+        key = args.key_file.read_text(encoding="utf-8").strip()
+        if args.role == "server":
+            text = paqet.render_server(
+                paqet.PaqetServer(args.interface, args.ip, args.router_mac, key, args.port)
+            )
+        else:
+            if not args.server_ip:
+                raise ConfigError("--server-ip is required for the client")
+            text = paqet.render_client(
+                paqet.PaqetClient(
+                    args.interface, args.ip, args.router_mac, args.server_ip, key, args.port
+                )
+            )
+        if args.out is not None:
+            write_private_file(args.out, text)
+        else:
+            out.write(text)
         return 0
 
     if args.command == "tactics-sign":
