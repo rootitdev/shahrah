@@ -20,6 +20,8 @@ import pytest
 from shahrah import waterwall as ww
 
 BIN = os.environ.get("SHAHRAH_WW_BIN", "")
+# The cover site is dialled on every leg handshake; pick one that is fast from this network.
+COVER = os.environ.get("SHAHRAH_WW_COVER", "www.speedtest.net")
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.skipif(
@@ -79,6 +81,7 @@ def test_backhaul_carries_traffic(tmp_path: Path, mode: str) -> None:
             iran_ip="127.0.0.1",
             exit_ip="127.0.0.1",
             password=password,
+            cover_sni=COVER,
             mode=mode,
             user_ports=(user_port,),
             tunnel_port=tunnel_port,
