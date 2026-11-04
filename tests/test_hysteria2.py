@@ -145,3 +145,13 @@ def test_subscription_keeps_tcp_first(endpoint) -> None:
     body = build_subscription([endpoint], USER, extra_links=["hysteria2://x@h:1/?a=b#n"])
     lines = base64.b64decode(body).decode().splitlines()
     assert lines[0].startswith("vless://") and lines[1].startswith("hysteria2://")
+
+
+def test_server_rejects_private_and_loopback_egress() -> None:
+    """Found in the lab: the Xray exit blocked private ranges but Hysteria2 forwarded to them."""
+    from shahrah.xray_config import PRIVATE_NETWORKS
+
+    text = hy.render_server(_settings(), [USER])
+    assert "acl:" in text
+    for net in PRIVATE_NETWORKS:
+        assert f'"reject({net})"' in text

@@ -39,6 +39,7 @@ from types import TracebackType
 from urllib.parse import quote, urlencode
 
 from .models import ConfigError, User, is_ip, validate_host, validate_port
+from .xray_config import PRIVATE_NETWORKS
 
 HYSTERIA_VERSION = "app/v2.13.0"
 # sha256 of the release binaries, from the GitHub release asset digests (published
@@ -254,6 +255,11 @@ def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: 
         "  proxy:",
         f"    url: {_q(settings.masquerade_url)}",
         "    rewriteHost: true",
+        # Same egress policy as the Xray exit: no SSRF into the exit's LAN or loopback
+        # (stats API, WaterWall/paqet listeners), no bittorrent-style abuse of private ranges.
+        "acl:",
+        "  inline:",
+        *(f"    - {_q(f'reject({net})')}" for net in PRIVATE_NETWORKS),
     ]
     return "\n".join(lines) + "\n"
 
