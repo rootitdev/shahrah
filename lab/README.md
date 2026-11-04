@@ -6,12 +6,12 @@ real Shahrah brain/oracle against a scripted censor, then writes `RESULTS.md` an
 
 ```
 client ── censor ── iran ── inet ──┬── exit   (Xray, Hysteria2, WaterWall exit, paqet server)
-10.0.1.2   (DPI,    10.0.2.2       ├── cover  23.5.100.2 (HTTPS/HTTP origin + REALITY target)
+10.0.1.2   (DPI,    10.0.2.2       ├── cover  198.18.5.2 (HTTPS/HTTP origin + REALITY target)
            tc,dns)  (WaterWall     
                      iran relay)
 ```
 
-The cover uses a public-looking address (23.5.100.2, only ever routed inside the namespaces) on
+The cover sits in the RFC 2544 benchmark range (198.18.5.2, routed only inside the lab) on
 purpose: Shahrah's Hysteria2 ACL and Xray's routing refuse egress to private ranges, and Xray 26's
 freedom outbound additionally blackholes reserved ranges (TEST-NET etc.), so a cover on 10.x or
 198.51.100.x is (correctly) unreachable through the tunnels.

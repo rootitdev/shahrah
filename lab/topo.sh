@@ -2,7 +2,7 @@
 # Censorship lab topology (root, network namespaces). Usage: topo.sh up|down
 #
 #   client(10.0.1.2) -c- censor -i- iran(10.0.2.2) -n- inet -+- exit(10.0.4.2)
-#                        10.0.1.1/10.0.2.1    10.0.3.1/10.0.3.2 +- cover(23.5.100.2)
+#                        10.0.1.1/10.0.2.1    10.0.3.1/10.0.3.2 +- cover(198.18.5.2)
 #
 # All addresses are private lab ranges; nothing here touches the host's real interfaces.
 set -Eeuo pipefail
@@ -18,7 +18,7 @@ link() { # nsA ifA addrA nsB ifB addrB
 
 hosts() { # per-namespace /etc/hosts and resolv.conf (ip netns exec bind-mounts these)
   mkdir -p "/etc/netns/$1"
-  printf '127.0.0.1 localhost\n23.5.100.2 cover.lab\n10.0.4.2 exit.lab\n10.0.2.2 iran.lab\n' \
+  printf '127.0.0.1 localhost\n198.18.5.2 cover.lab\n10.0.4.2 exit.lab\n10.0.2.2 iran.lab\n' \
     > "/etc/netns/$1/hosts"
   if [[ "$1" == client ]]; then
     # the client uses the censor's resolver, so dns-poison can lie to it; hosts stays minimal
@@ -36,7 +36,7 @@ up() {
   link censor i1 10.0.2.1/24 iran i0 10.0.2.2/24
   link iran n0 10.0.3.1/24 inet n1 10.0.3.2/24
   link inet e1 10.0.4.1/24 exit e0 10.0.4.2/24
-  link inet v1 23.5.100.1/24 cover v0 23.5.100.2/24
+  link inet v1 198.18.5.1/24 cover v0 198.18.5.2/24
   ip -n client route add default via 10.0.1.1
   ip -n censor route add default via 10.0.2.2
   ip -n iran route add 10.0.1.0/24 via 10.0.2.1
@@ -44,7 +44,7 @@ up() {
   ip -n inet route add 10.0.1.0/24 via 10.0.3.1
   ip -n inet route add 10.0.2.0/24 via 10.0.3.1
   ip -n exit route add default via 10.0.4.1
-  ip -n cover route add default via 23.5.100.1
+  ip -n cover route add default via 198.18.5.1
   for n in censor iran inet; do ip netns exec "$n" sysctl -qw net.ipv4.ip_forward=1; done
   for n in "${NS[@]}"; do
     ip netns exec "$n" sysctl -qw net.ipv6.conf.all.disable_ipv6=1 || true

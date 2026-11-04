@@ -45,7 +45,7 @@ case "$P" in
   allowlist-ip)
     established
     fw -d 10.0.2.2 -j ACCEPT
-    fw -d 23.5.100.2 -j ACCEPT
+    fw -d 198.18.5.2 -j ACCEPT
     fw -j DROP ;;
   icmp-only) established; fw -p icmp -j ACCEPT; fw -j DROP ;;
   dns-poison) echo poison > "$RUN/dns_mode" ;;

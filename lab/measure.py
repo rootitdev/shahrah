@@ -36,7 +36,7 @@ PROFILES = [
     "icmp-only", "dns-poison", "lossy-mobile", "shutdown",
 ]
 PATHS = ["reality-vision", "reality-xhttp", "reality-domain", "relay-ww", "hysteria2", "paqet"]
-COVER_IP, COVER_SNI = "23.5.100.2", "cover.lab"
+COVER_IP, COVER_SNI = "198.18.5.2", "cover.lab"
 HTTP_TARGET = ProbeTarget(host=COVER_IP, port=80, path="/", tls=False,
                           expect_status=frozenset({200}))
 SMALL_N, CONC, TIMEOUT = 20, 5, 6.0

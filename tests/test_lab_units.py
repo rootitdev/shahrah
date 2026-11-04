@@ -47,7 +47,7 @@ def _ipv4_tcp(dst: str, payload: bytes) -> bytes:
     return ip + tcp + payload
 
 
-ALLOW = {"cover.lab": {"23.5.100.2"}, "iran.lab": {"10.0.2.2"}}
+ALLOW = {"cover.lab": {"198.18.5.2"}, "iran.lab": {"10.0.2.2"}}
 
 
 def test_sni_is_parsed_from_a_real_client_hello() -> None:
@@ -58,9 +58,9 @@ def test_sni_is_parsed_from_a_real_client_hello() -> None:
 
 
 def test_allowlist_and_sni_dns_mismatch() -> None:
-    assert dpi.decide("cover.lab", "23.5.100.2", ALLOW) == "pass"
+    assert dpi.decide("cover.lab", "198.18.5.2", ALLOW) == "pass"
     assert dpi.decide("cover.lab", "10.0.4.2", ALLOW) == "block-mismatch"  # borrowed SNI
-    assert dpi.decide("blocked.example", "23.5.100.2", ALLOW) == "block-sni"
+    assert dpi.decide("blocked.example", "198.18.5.2", ALLOW) == "block-sni"
     assert dpi.decide(None, "10.0.4.2", ALLOW) == "pass"
 
 
@@ -74,7 +74,7 @@ def test_resolver_truth_and_poison() -> None:
     assert truth.endswith(socket.inet_aton("10.0.4.2"))
     poisoned = dnsd.answer(_query("exit.lab"), "poison")
     assert poisoned.endswith(socket.inet_aton(dnsd.SINKHOLE))
-    assert dnsd.answer(_query("cover.lab"), "poison").endswith(socket.inet_aton("23.5.100.2"))
+    assert dnsd.answer(_query("cover.lab"), "poison").endswith(socket.inet_aton("198.18.5.2"))
 
 
 @pytest.mark.lab

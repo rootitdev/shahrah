@@ -68,7 +68,7 @@ up() {
 
   # WaterWall relay: users dial iran:443, exit dials iran:8443 (reverse), cover pinned by IP
   local ww=(--iran-ip 10.0.2.2 --exit-ip 10.0.4.2 --key-file "$RUN/backhaul.key"
-    --cover-sni cover.lab --cover-addr 23.5.100.2 --exit-service 127.0.0.1:443 --no-verify-cover)
+    --cover-sni cover.lab --cover-addr 198.18.5.2 --exit-service 127.0.0.1:443 --no-verify-cover)
   python3 -m shahrah waterwall-config iran "${ww[@]}" --out-dir "$RUN/ww-iran" >/dev/null
   python3 -m shahrah waterwall-config exit "${ww[@]}" --out-dir "$RUN/ww-exit" >/dev/null
   for side in iran exit; do

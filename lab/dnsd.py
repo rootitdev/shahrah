@@ -8,7 +8,7 @@ import struct
 import sys
 from pathlib import Path
 
-ZONE = {"cover.lab": "23.5.100.2", "exit.lab": "10.0.4.2", "iran.lab": "10.0.2.2"}
+ZONE = {"cover.lab": "198.18.5.2", "exit.lab": "10.0.4.2", "iran.lab": "10.0.2.2"}
 ALLOW = {"cover.lab", "iran.lab"}
 SINKHOLE = "10.10.34.34"
 MODE_FILE = Path("/run/shahrah-lab/dns_mode")
