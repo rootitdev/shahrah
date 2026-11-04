@@ -168,3 +168,17 @@ filtered while 80 and 443 stayed open. `--multi-port` still installs a 53 listen
 scenarios and other networks, but operators should verify `timeout 3 bash -c 'echo >/dev/tcp/EXIT/53'`
 from an Iran vantage before advertising that port to clients. Shahrah's crisis ranking already
 prefers 443 then 80.
+
+## Allowlist resilience (phase 1)
+
+Details and operator steps: [ALLOWLIST.md](ALLOWLIST.md).
+
+* `sni_dns` — SNI↔DNS plausibility of REALITY targets (bbs#668); used by `sni-scout --node-ip`
+  and `readycheck.check_sni_dns`.
+* `tactics` — per-ASN, per-mode tactics profiles in an HMAC-signed, expiring, serial-numbered
+  bundle served next to the subscription (`/<secret>/<label>/tactics`).
+* Brain `on_mode_change` hook — entering `restricted`/`outage` starts the crisis tier
+  (`--paqet-unit`), leaving it stops it.
+* `paqet` — raw-packet KCP crisis path as a pinned external binary (`install.sh --with-paqet`).
+* Social quality — `Tuning` preset `social` and `brain --social-probe` (weighted Instagram
+  targets folded into one Oracle probe).
