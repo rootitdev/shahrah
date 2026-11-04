@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .models import ConfigError
+from . import sni_dns
+from .models import ConfigError, is_ip
 
 _VLESS = re.compile(r"^vless://", re.IGNORECASE)
 
@@ -104,3 +105,25 @@ def check_subscription(body: str) -> ReadyReport:
     if report.link_count < 1:
         report.ok = False
     return report
+
+
+def check_sni_dns(
+    body: str,
+    resolver: sni_dns.Resolver = sni_dns.system_resolver,
+) -> list[sni_dns.SniDnsCheck]:
+    """SNI<->DNS plausibility for every REALITY link whose address is a literal IP.
+
+    Links addressed by a domain are resolved first; the check then runs against each address.
+    """
+    checks: list[sni_dns.SniDnsCheck] = []
+    for link in decode_subscription(body):
+        if not _VLESS.match(link):
+            continue
+        parsed = urlparse(link)
+        qs = {k: (v[0] if v else "") for k, v in parse_qs(parsed.query).items()}
+        if qs.get("security") != "reality" or not qs.get("sni") or not parsed.hostname:
+            continue
+        host = parsed.hostname
+        addresses = [host] if is_ip(host) else list(resolver(host))
+        checks.extend(sni_dns.check(qs["sni"], ip, resolver) for ip in addresses)
+    return checks

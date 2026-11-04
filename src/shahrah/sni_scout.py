@@ -10,7 +10,9 @@ A candidate is rejected when:
 * the TCP connect or TLS handshake fails / times out;
 * the negotiated TLS version is below 1.3 (REALITY requires 1.3);
 * the certificate does not cover the probed name;
-* the host is on the known-risky Apple/iCloud suffix list (see ``RISKY_TARGET_SUFFIXES``).
+* the host is on the known-risky Apple/iCloud suffix list (see ``RISKY_TARGET_SUFFIXES``);
+* ``node_ip`` is given and the host's DNS is not plausible for that IP (see ``sni_dns``;
+  net4people/bbs#668: DPI compares SNI with the destination IP).
 
 Among the survivors, lower handshake latency ranks first.
 """
@@ -21,8 +23,9 @@ import socket
 import ssl
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from . import sni_dns
 from .models import RISKY_TARGET_SUFFIXES, ConfigError, is_ip, validate_host
 
 DEFAULT_TIMEOUT_S = 5.0
@@ -49,19 +52,18 @@ class ScoutResult:
     alpn: str | None
     detail: str = ""
     architectures: tuple[str, ...] = ()
+    dns: sni_dns.SniDnsCheck | None = None
 
     def with_arch(self) -> ScoutResult:
         """Tag survivors as REALITY-capable; CDN edges use operator-owned names, not these."""
         arch: tuple[str, ...] = ("reality",) if self.ok else ()
-        return ScoutResult(
-            self.host,
-            self.ok,
-            self.latency_ms,
-            self.tls_version,
-            self.alpn,
-            self.detail,
-            arch,
-        )
+        return replace(self, architectures=arch)
+
+    def with_dns(self, dns: sni_dns.SniDnsCheck, *, strict: bool) -> ScoutResult:
+        """Attach the SNI<->DNS verdict; an implausible target is demoted to a failure."""
+        if self.ok and not dns.accepted(strict=strict):
+            return replace(self, ok=False, dns=dns, detail=f"sni-dns {dns.verdict}: {dns.detail}")
+        return replace(self, dns=dns)
 
 
 def _handshake(host: str, port: int, timeout_s: float) -> ScoutResult:
@@ -112,12 +114,18 @@ def scout(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     allow_risky: bool = False,
     use_defaults: bool = False,
+    node_ip: str | None = None,
+    resolver: sni_dns.Resolver = sni_dns.system_resolver,
+    strict_dns: bool = False,
 ) -> list[ScoutResult]:
     """Probe ``hosts`` and return every result (failures included), best-first among successes.
 
     When ``hosts`` is empty and ``use_defaults`` is true, probe ``DEFAULT_REALITY_CANDIDATES``
     (skipping risky suffixes unless ``allow_risky``). Run this on the exit node that will dial
     the REALITY target so latency reflects the production path.
+
+    With ``node_ip`` (the public IP clients dial) each survivor must also pass the SNI<->DNS
+    plausibility check; ``strict_dns`` accepts only an own domain resolving to ``node_ip``.
     """
     incoming = list(hosts or [])
     if not incoming and use_defaults:
@@ -139,7 +147,12 @@ def scout(
             )
         cleaned.append(host)
 
-    results = [_handshake(host, port, timeout_s).with_arch() for host in cleaned]
+    results = [_handshake(host, port, timeout_s) for host in cleaned]
+    if node_ip is not None:
+        results = [
+            r.with_dns(sni_dns.check(r.host, node_ip, resolver), strict=strict_dns) for r in results
+        ]
+    results = [r.with_arch() for r in results]
     ok = sorted(
         (r for r in results if r.ok), key=lambda r: (r.latency_ms is None, r.latency_ms, r.host)
     )

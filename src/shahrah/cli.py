@@ -292,6 +292,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     scout.add_argument("--timeout", type=float, default=5.0)
     scout.add_argument("--allow-risky", action="store_true")
+    scout.add_argument(
+        "--node-ip",
+        help="public node IP: reject targets whose DNS is implausible for it (bbs#668)",
+    )
+    scout.add_argument(
+        "--strict-dns",
+        action="store_true",
+        help="with --node-ip: accept only an own domain resolving to the node IP",
+    )
     scout.add_argument("--json", action="store_true", help="machine-readable output")
 
     retarget = sub.add_parser(
@@ -559,9 +568,7 @@ def _probe_destinations(specs: Sequence[str]) -> list[ProbeTarget]:
         return [
             ProbeTarget(),
             ProbeTarget("www.instagram.com", path="/", expect_status=frozenset({200, 301, 302})),
-            ProbeTarget(
-                "telegram.org", path="/", expect_status=frozenset({200, 301, 302, 404})
-            ),
+            ProbeTarget("telegram.org", path="/", expect_status=frozenset({200, 301, 302, 404})),
             ProbeTarget("chatgpt.com", path="/", expect_status=common),
             ProbeTarget("claude.ai", path="/", expect_status=common),
         ]
@@ -910,11 +917,7 @@ def _run(args: argparse.Namespace) -> int:
                 out.write(f"  {flag} {item['name']}{detail}\n")
         return 0 if report.ok else 2
     if args.command == "ready-check":
-        body = (
-            args.file.read_text(encoding="utf-8")
-            if args.file is not None
-            else sys.stdin.read()
-        )
+        body = args.file.read_text(encoding="utf-8") if args.file is not None else sys.stdin.read()
         report = readycheck.check_subscription(body)
         data = report.as_dict()
         if args.json:
@@ -1064,6 +1067,8 @@ def _run(args: argparse.Namespace) -> int:
             timeout_s=args.timeout,
             allow_risky=args.allow_risky,
             use_defaults=args.defaults,
+            node_ip=args.node_ip,
+            strict_dns=args.strict_dns,
         )
         if args.json:
             out.write(
@@ -1077,6 +1082,7 @@ def _run(args: argparse.Namespace) -> int:
                             "alpn": r.alpn,
                             "detail": r.detail,
                             "architectures": list(r.architectures),
+                            "sni_dns": r.dns.as_dict() if r.dns else None,
                         }
                         for r in results
                     ],
