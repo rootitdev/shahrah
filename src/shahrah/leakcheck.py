@@ -20,9 +20,7 @@ class LeakCheckReport:
         return {"ok": self.ok, "checks": self.checks}
 
 
-def _add(
-    report: LeakCheckReport, name: str, passed: bool, detail: str = ""
-) -> None:
+def _add(report: LeakCheckReport, name: str, passed: bool, detail: str = "") -> None:
     report.checks.append({"name": name, "ok": passed, "detail": detail})
     if not passed:
         report.ok = False
@@ -111,8 +109,7 @@ def check_client_template(config: dict[str, Any]) -> LeakCheckReport:
         isinstance(rule, dict)
         and rule.get("outboundTag") in {"BLOCK", "block"}
         and any(
-            str(ip).startswith("224.") or str(ip).startswith("ff")
-            for ip in (rule.get("ip") or [])
+            str(ip).startswith("224.") or str(ip).startswith("ff") for ip in (rule.get("ip") or [])
         )
         for rule in rules
     )

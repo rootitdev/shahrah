@@ -65,9 +65,7 @@ def test_bash_accepts_the_syntax() -> None:
             pytest.skip("bash is not usable here")
         if b"\x00" in result.stdout + result.stderr:
             pytest.skip("bash is only the WSL launcher stub (no distribution installed)")
-        assert result.returncode == 0, (
-            f"{script.name}: {result.stderr.decode(errors='replace')}"
-        )
+        assert result.returncode == 0, f"{script.name}: {result.stderr.decode(errors='replace')}"
 
 
 def test_attach_domain_is_dry_run_by_default() -> None:

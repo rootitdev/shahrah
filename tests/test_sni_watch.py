@@ -11,9 +11,7 @@ from shahrah.sni_watch import WatchStore, domain_matches, load_watchlist, parse_
 
 def _line(user: str = "alice", domain: str = "instagram.com") -> str:
     ts = time.strftime("%Y/%m/%d %H:%M:%S", time.localtime())
-    return (
-        f"{ts}.123456 from 198.51.100.1:1 accepted tcp:{domain}:443 email: {user}"
-    )
+    return f"{ts}.123456 from 198.51.100.1:1 accepted tcp:{domain}:443 email: {user}"
 
 
 LINE = _line()

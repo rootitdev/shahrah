@@ -24,9 +24,7 @@ DEFAULT_SOAK_TARGETS: tuple[ProbeTarget, ...] = (
     ProbeTarget(),
     ProbeTarget("www.instagram.com", path="/", expect_status=frozenset({200, 301, 302})),
     # telegram.org sometimes serves 404 to bare HTTPS probes; still proves the tunnel.
-    ProbeTarget(
-        "telegram.org", path="/", expect_status=frozenset({200, 301, 302, 404})
-    ),
+    ProbeTarget("telegram.org", path="/", expect_status=frozenset({200, 301, 302, 404})),
     ProbeTarget("chatgpt.com", path="/", expect_status=frozenset({200, 301, 302, 403})),
     ProbeTarget("claude.ai", path="/", expect_status=frozenset({200, 301, 302, 403})),
 )

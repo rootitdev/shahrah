@@ -202,9 +202,7 @@ class PanelClient:
         )
         return True
 
-    def upsert_client_template(
-        self, name: str, content: str, *, make_default: bool = False
-    ) -> str:
+    def upsert_client_template(self, name: str, content: str, *, make_default: bool = False) -> str:
         """Create or replace a named Xray subscription template.
 
         Returns ``\"created\"`` or ``\"updated\"``. Replacing content is intentional (leak rules
@@ -274,9 +272,7 @@ class PanelClient:
         self._request("POST", "/api/core", dict(payload))
         return True
 
-    def update_core(
-        self, payload: Mapping[str, Any], *, restart_nodes: bool = False
-    ) -> None:
+    def update_core(self, payload: Mapping[str, Any], *, restart_nodes: bool = False) -> None:
         """Replace an existing core's config by name (PasarGuard ``PUT /api/core/{id}``).
 
         ``restart_nodes`` is a query flag on the panel API. Default false keeps
