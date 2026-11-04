@@ -1,0 +1,642 @@
+{
+  "generated": "2026-11-04 14:42 +0330",
+  "matrix": {
+    "open": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 10.7,
+        "p50_ms": 10.7,
+        "p95_ms": 22.0,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.9,
+        "p50_ms": 9.1,
+        "p95_ms": 32.0,
+        "media_ok": true,
+        "media_s": 0.03
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 9.3,
+        "p50_ms": 9.5,
+        "p95_ms": 13.2,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 14.7,
+        "p50_ms": 14.8,
+        "p95_ms": 39.1,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.4,
+        "p50_ms": 8.5,
+        "p95_ms": 16.4,
+        "media_ok": true,
+        "media_s": 0.34
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 121.0,
+        "p50_ms": 121.9,
+        "p95_ms": 122.8,
+        "media_ok": true,
+        "media_s": 0.15
+      }
+    },
+    "sni-dpi": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 6.8,
+        "p50_ms": 7.0,
+        "p95_ms": 9.6,
+        "media_ok": true,
+        "media_s": 0.03
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.3,
+        "p50_ms": 9.0,
+        "p95_ms": 12.8,
+        "media_ok": true,
+        "media_s": 0.34
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 120.8,
+        "p50_ms": 121.6,
+        "p95_ms": 123.4,
+        "media_ok": true,
+        "media_s": 0.22
+      }
+    },
+    "udp-block": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.5,
+        "p50_ms": 8.7,
+        "p95_ms": 11.9,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 7.8,
+        "p50_ms": 8.1,
+        "p95_ms": 9.5,
+        "media_ok": true,
+        "media_s": 0.03
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 9.9,
+        "p50_ms": 10.3,
+        "p95_ms": 12.5,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 13.7,
+        "p50_ms": 14.3,
+        "p95_ms": 1012.6,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 121.6,
+        "p50_ms": 122.2,
+        "p95_ms": 123.2,
+        "media_ok": true,
+        "media_s": 0.17
+      }
+    },
+    "udp-throttle": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 7.8,
+        "p50_ms": 8.0,
+        "p95_ms": 10.3,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 7.3,
+        "p50_ms": 7.9,
+        "p95_ms": 9.6,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.7,
+        "p50_ms": 8.9,
+        "p95_ms": 11.9,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 12.5,
+        "p50_ms": 12.9,
+        "p95_ms": 14.8,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 120.8,
+        "p50_ms": 121.4,
+        "p95_ms": 122.8,
+        "media_ok": true,
+        "media_s": 0.17
+      }
+    },
+    "allowlist-ip": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 10.1,
+        "p50_ms": 10.2,
+        "p95_ms": 1053.0,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      }
+    },
+    "icmp-only": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      }
+    },
+    "dns-poison": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.7,
+        "p50_ms": 8.8,
+        "p95_ms": 11.0,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.4,
+        "p50_ms": 8.8,
+        "p95_ms": 12.3,
+        "media_ok": true,
+        "media_s": 0.04
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 11.8,
+        "p50_ms": 12.4,
+        "p95_ms": 38.9,
+        "media_ok": true,
+        "media_s": 0.02
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 6.9,
+        "p50_ms": 7.2,
+        "p95_ms": 10.4,
+        "media_ok": true,
+        "media_s": 0.34
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 120.7,
+        "p50_ms": 121.6,
+        "p95_ms": 122.6,
+        "media_ok": true,
+        "media_s": 0.18
+      }
+    },
+    "lossy-mobile": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 633.2,
+        "p50_ms": 655.8,
+        "p95_ms": 1610.0,
+        "media_ok": true,
+        "media_s": 2.19
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 452.1,
+        "p50_ms": 452.2,
+        "p95_ms": 643.1,
+        "media_ok": true,
+        "media_s": 0.92
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 877.7,
+        "p50_ms": 878.0,
+        "p95_ms": 2630.1,
+        "media_ok": true,
+        "media_s": 2.26
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 642.2,
+        "p50_ms": 642.3,
+        "p95_ms": 1652.0,
+        "media_ok": true,
+        "media_s": 2.25
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 331.8,
+        "p50_ms": 334.3,
+        "p95_ms": 627.4,
+        "media_ok": true,
+        "media_s": 1.44
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 395.2,
+        "p50_ms": 395.5,
+        "p95_ms": 580.7,
+        "media_ok": true,
+        "media_s": 1.29
+      }
+    },
+    "shutdown": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      }
+    }
+  },
+  "brain": {
+    "phases": [
+      {
+        "profile": "open",
+        "expected_mode": "normal",
+        "expected_active": "reality-vision",
+        "observed": {
+          "mode": "normal",
+          "active": "reality-vision",
+          "ranking": [
+            "reality-vision",
+            "reality-xhttp",
+            "hysteria2",
+            "relay-ww"
+          ]
+        },
+        "trace": [
+          {
+            "mode": "normal",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "hysteria2",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "normal",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "hysteria2",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "normal",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "hysteria2",
+              "relay-ww"
+            ]
+          }
+        ],
+        "cycles": 3,
+        "pass": true
+      },
+      {
+        "profile": "udp-block",
+        "expected_mode": "degraded",
+        "expected_active": "reality-vision",
+        "observed": {
+          "mode": "degraded",
+          "active": "reality-vision",
+          "ranking": [
+            "reality-vision",
+            "reality-xhttp",
+            "relay-ww"
+          ]
+        },
+        "trace": [
+          {
+            "mode": "normal",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "hysteria2",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "degraded",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "degraded",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "relay-ww"
+            ]
+          }
+        ],
+        "cycles": 3,
+        "pass": true
+      },
+      {
+        "profile": "allowlist-ip",
+        "expected_mode": "restricted",
+        "expected_active": "relay-ww",
+        "observed": {
+          "mode": "restricted",
+          "active": "relay-ww",
+          "ranking": [
+            "relay-ww"
+          ]
+        },
+        "trace": [
+          {
+            "mode": "degraded",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "restricted",
+            "active": "relay-ww",
+            "ranking": [
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "restricted",
+            "active": "relay-ww",
+            "ranking": [
+              "relay-ww"
+            ]
+          }
+        ],
+        "cycles": 3,
+        "pass": true
+      },
+      {
+        "profile": "shutdown",
+        "expected_mode": "outage",
+        "expected_active": null,
+        "observed": {
+          "mode": "outage",
+          "active": "relay-ww",
+          "ranking": []
+        },
+        "trace": [
+          {
+            "mode": "restricted",
+            "active": "relay-ww",
+            "ranking": [
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "degraded",
+            "active": "relay-ww",
+            "ranking": []
+          },
+          {
+            "mode": "outage",
+            "active": "relay-ww",
+            "ranking": []
+          }
+        ],
+        "cycles": 3,
+        "pass": true
+      },
+      {
+        "profile": "open",
+        "expected_mode": "normal",
+        "expected_active": "reality-vision",
+        "observed": {
+          "mode": "normal",
+          "active": "reality-vision",
+          "ranking": [
+            "reality-vision",
+            "reality-xhttp",
+            "hysteria2",
+            "relay-ww"
+          ]
+        },
+        "trace": [
+          {
+            "mode": "restricted",
+            "active": "paqet",
+            "ranking": [
+              "paqet"
+            ]
+          },
+          {
+            "mode": "degraded",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "hysteria2",
+              "relay-ww",
+              "paqet"
+            ]
+          },
+          {
+            "mode": "degraded",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "hysteria2",
+              "relay-ww"
+            ]
+          },
+          {
+            "mode": "normal",
+            "active": "reality-vision",
+            "ranking": [
+              "reality-vision",
+              "reality-xhttp",
+              "hysteria2",
+              "relay-ww"
+            ]
+          }
+        ],
+        "cycles": 4,
+        "pass": true
+      }
+    ],
+    "pass": true
+  }
+}

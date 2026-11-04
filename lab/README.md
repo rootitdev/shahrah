@@ -81,3 +81,8 @@ A real deployment needs an SNI that resolves to (or is plausible for) the relay'
   "ESTABLISHED" and dies under icmp-only. A loose stateful firewall would let it through.
 - In `outage` the brain keeps the last active path (ranking is empty) instead of clearing it;
   that avoids flapping and is how it is meant to behave.
+- `reality-xhttp` shows as passing `sni-dpi`. Its pooled HTTP/2 connection, opened under the
+  previous profile, outlived the switch, and this DPI only judges new handshakes. That says
+  long-lived XHTTP connections ride out a policy change. It does **not** say a fresh XHTTP
+  handshake passes; a fresh one with a borrowed SNI is reset like Vision. Open: re-run
+  with a new client session per profile.
