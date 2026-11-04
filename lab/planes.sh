@@ -63,6 +63,18 @@ up() {
     --cert-path "$RUN/hy2.crt" --key-path "$RUN/hy2.key" >/dev/null
   $SH apply --xray-bin "$BIN/xray" --config-out "$RUN/xray-exit.json" >/dev/null
   $SH hysteria2 server --out "$RUN/hy2-server.yaml" >/dev/null
+  # Lab-only: Xray 26 freedom blackholes reserved ranges (incl. 198.18.0.0/15) for proxied
+  # traffic. Open exactly the cover's 443/80 so tunnels can reach it; production keeps defaults.
+  python3 - "$RUN/xray-exit.json" <<'PY'
+import json, sys
+path = sys.argv[1]
+cfg = json.load(open(path))
+for ob in cfg["outbounds"]:
+    if ob.get("protocol") == "freedom":
+        ob.setdefault("settings", {})["finalRules"] = [
+            {"action": "allow", "network": "tcp", "port": "80,443", "ip": ["198.18.5.2/32"]}]
+json.dump(cfg, open(path, "w"), indent=2)
+PY
   bg exit xray-exit "$BIN/xray" run -c "$RUN/xray-exit.json"
   bg exit hy2-exit "$BIN/hysteria" server -c "$RUN/hy2-server.yaml" --disable-update-check
 

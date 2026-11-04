@@ -14,7 +14,8 @@ client ── censor ── iran ── inet ──┬── exit   (Xray, Hyste
 The cover sits in the RFC 2544 benchmark range (198.18.5.2, routed only inside the lab) on
 purpose: Shahrah's Hysteria2 ACL and Xray's routing refuse egress to private ranges, and Xray 26's
 freedom outbound additionally blackholes reserved ranges (TEST-NET etc.), so a cover on 10.x or
-198.51.100.x is (correctly) unreachable through the tunnels.
+198.51.100.x is (correctly) unreachable through the tunnels. `planes.sh` adds one lab-only
+Xray `finalRules` allow for 198.18.5.2 tcp/80,443; nothing in `src/` changes.
 
 ## Run
 
