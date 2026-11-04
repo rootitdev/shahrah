@@ -4,6 +4,8 @@ brain/oracle failover scenario. Writes lab/results.json and lab/RESULTS.md."""
 from __future__ import annotations
 
 import json
+import os
+import re
 import socket
 import ssl
 import statistics
@@ -11,6 +13,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack
 from dataclasses import replace
 from pathlib import Path
 
@@ -18,6 +21,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "src"))
 
 from shahrah.brain import Brain, BrainConfig, Sidecar  # noqa: E402
+from shahrah import hysteria2 as hy2mod  # noqa: E402
 from shahrah.hysteria2 import Hy2ProbeSession  # noqa: E402
 from shahrah.oracle import OracleConfig  # noqa: E402
 from shahrah.prober import (  # noqa: E402
@@ -32,20 +36,69 @@ from shahrah.state import load_state  # noqa: E402
 RUN = Path("/run/shahrah-lab")
 BIN = Path("/root/shahrah-lab-bin")
 PROFILES = [
-    "open", "sni-dpi", "udp-block", "udp-throttle", "allowlist-ip",
-    "icmp-only", "dns-poison", "lossy-mobile", "shutdown",
+    "open",
+    "sni-dpi",
+    "udp-block",
+    "udp-throttle",
+    "allowlist-ip",
+    "icmp-only",
+    "dns-poison",
+    "lossy-mobile",
+    "shutdown",
 ]
-PATHS = ["reality-vision", "reality-xhttp", "reality-domain", "relay-ww", "hysteria2", "paqet"]
+PATHS = [
+    "reality-vision",
+    "reality-xhttp",
+    "reality-domain",
+    "relay-ww",
+    "cdn-xhttp",
+    "hysteria2",
+    "hysteria2-plain",
+    "paqet",
+]
+XRAY_PATHS = PATHS[:5]
+# (row name, client-leg profile, international-gateway profile)
+ROWS = [(p, p, "open") for p in PROFILES] + [
+    ("sni-dpi-strict", "sni-dpi-strict", "open"),
+    ("intl:sni-dpi", "open", "sni-dpi"),
+    ("intl:udp-block", "open", "udp-block"),
+    ("intl:allowlist-ip", "open", "allowlist-ip"),
+    ("intl:lossy-mobile", "open", "lossy-mobile"),
+]
 COVER_IP, COVER_SNI = "198.18.5.2", "cover.lab"
-HTTP_TARGET = ProbeTarget(host=COVER_IP, port=80, path="/", tls=False,
-                          expect_status=frozenset({200}))
+HTTP_TARGET = ProbeTarget(
+    host=COVER_IP, port=80, path="/", tls=False, expect_status=frozenset({200})
+)
 SMALL_N, CONC, TIMEOUT = 20, 5, 6.0
 
 
-def censor(profile: str) -> None:
-    subprocess.run(["bash", str(HERE / "censor.sh"), profile], check=True,
-                   stdout=subprocess.DEVNULL)
+def censor(client: str, intl: str = "open") -> None:
+    """Both censor legs; "intl:<p>" as a client profile means open client leg + <p> abroad."""
+    if client.startswith("intl:"):
+        client, intl = "open", client[5:]
+    for leg, prof in (("client", client), ("intl", intl)):
+        subprocess.run(
+            ["bash", str(HERE / "censor.sh"), "--leg", leg, prof],
+            check=True,
+            stdout=subprocess.DEVNULL,
+        )
     time.sleep(1.0)
+
+
+class PlainHy2(Hy2ProbeSession):
+    """Client for the lab's second Hysteria2 server (8444, no salamander: readable QUIC)."""
+
+    def start(self) -> None:
+        orig = hy2mod.render_client
+
+        def plain(*a, **kw):  # noqa: ANN002, ANN003, ANN202
+            return re.sub(r"(?ms)^obfs:\n(?:  .*\n)+", "", orig(*a, **kw))
+
+        hy2mod.render_client = plain
+        try:
+            super().start()
+        finally:
+            hy2mod.render_client = orig
 
 
 def https_get(port: int, path: str, timeout: float) -> tuple[float, float, int]:
@@ -55,7 +108,9 @@ def https_get(port: int, path: str, timeout: float) -> tuple[float, float, int]:
     ctx = ssl.create_default_context(cafile=str(RUN / "ca.crt"))
     with ctx.wrap_socket(sock, server_hostname=COVER_SNI) as tls:
         tls.settimeout(timeout)
-        tls.sendall(f"GET {path} HTTP/1.1\r\nHost: {COVER_SNI}\r\nConnection: close\r\n\r\n".encode())
+        tls.sendall(
+            f"GET {path} HTTP/1.1\r\nHost: {COVER_SNI}\r\nConnection: close\r\n\r\n".encode()
+        )
         first = tls.recv(65536)
         if not first:
             raise ConnectionError("empty response")
@@ -116,27 +171,60 @@ def _try(port: int, path: str, timeout: float = TIMEOUT) -> tuple[float, float, 
 
 def endpoints():  # noqa: ANN201
     state = load_state(RUN / "exit-state.json")
-    eps = {e.port: e for e in state.endpoints()}
+    all_eps = state.endpoints()
+    cdn = next(e for e in all_eps if e.name.endswith("-cdn-8080"))
+    eps = {e.port: e for e in all_eps if e is not cdn}
     vision, xhttp = eps[443], eps[80]
     return state, [
         replace(vision, name="reality-vision", priority=0),
         replace(xhttp, name="reality-xhttp", priority=1),
         replace(vision, name="reality-domain", host="exit.lab", priority=4),
         replace(vision, name="relay-ww", host="10.0.2.2", priority=3, lockdown_capable=True),
+        replace(cdn, name="cdn-xhttp", priority=6),
     ]
 
 
-def matrix(xray: XrayProbeSession, hy2: Hy2ProbeSession) -> dict:
-    ports = {e: xray.socks_port(e) for e in PATHS[:4]}
-    ports["hysteria2"] = hy2.socks_port
-    ports["paqet"] = 1080
+def matrix(state, eps: list) -> dict:  # noqa: ANN001
+    """Every row gets brand-new client processes, started *after* the censor switched, so no
+    pooled connection (XHTTP/H2, QUIC) from the previous profile can carry over."""
+    user = state.users[0]
     out: dict[str, dict] = {}
-    for profile in PROFILES:
-        censor(profile)
-        out[profile] = {}
-        for path in PATHS:
-            out[profile][path] = workload(ports[path])
-            print(profile, path, out[profile][path], flush=True)
+    wanted = [r for r in os.environ.get("LAB_ROWS", "").split(",") if r]  # quick partial runs
+    for row, client, intl in ROWS:
+        if wanted and row not in wanted:
+            continue
+        censor(client, intl)
+        out[row] = {}
+        ports: dict[str, int | None] = {"paqet": 1080}
+        with ExitStack() as stack:
+            try:
+                xray = stack.enter_context(
+                    XrayProbeSession(str(BIN / "xray"), eps, user, target=HTTP_TARGET)
+                )
+                ports.update({e: xray.socks_port(e) for e in XRAY_PATHS})
+            except ProbeError as exc:
+                print(row, "xray client failed:", exc, flush=True)
+            for name, cls, port in (
+                ("hysteria2", Hy2ProbeSession, None),
+                ("hysteria2-plain", PlainHy2, 8444),
+            ):
+                try:
+                    s = stack.enter_context(
+                        cls(
+                            str(BIN / "hysteria"),
+                            state.hysteria2,
+                            "10.0.4.2",
+                            user,
+                            server_port=port,
+                        )
+                    )
+                    ports[name] = s.socks_port
+                except ProbeError as exc:
+                    print(row, name, "client failed:", exc, flush=True)
+            time.sleep(1.0)
+            for path in PATHS:
+                out[row][path] = workload(ports.get(path))
+                print(row, path, out[row][path], flush=True)
     censor("open")
     return out
 
@@ -148,8 +236,7 @@ def brain_scenario(xray: XrayProbeSession, hy2: Hy2ProbeSession, eps: list) -> d
         endpoints=tuple(by_name.values()),
         probe_user=state.users[0],
         remarks={},
-        oracle=OracleConfig(fail_streak=2, recover_streak=2, min_dwell_s=0,
-                            outage_after_cycles=2),
+        oracle=OracleConfig(fail_streak=2, recover_streak=2, min_dwell_s=0, outage_after_cycles=2),
         sidecars=(
             Sidecar("hysteria2", "hysteria2", hy2.socks_port, priority=2),
             Sidecar("paqet", "paqet", 1080, priority=5),
@@ -176,6 +263,7 @@ def brain_scenario(xray: XrayProbeSession, hy2: Hy2ProbeSession, eps: list) -> d
         ("open", "normal", "reality-vision"),
         ("udp-block", "degraded", "reality-vision"),
         ("allowlist-ip", "restricted", "relay-ww"),
+        ("intl:allowlist-ip", "restricted", "cdn-xhttp"),
         ("shutdown", "outage", None),
         ("open", "normal", "reality-vision"),
     ]
@@ -191,28 +279,38 @@ def brain_scenario(xray: XrayProbeSession, hy2: Hy2ProbeSession, eps: list) -> d
             clock[0] += 30
             d = brain.cycle()
             if d is not None:
-                last = {"mode": str(d.state.mode), "active": d.state.active,
-                        "ranking": list(d.ranking)}
+                last = {
+                    "mode": str(d.state.mode),
+                    "active": d.state.active,
+                    "ranking": list(d.ranking),
+                }
                 trace.append(last)
             active_ok = want_active is None or last.get("active") == want_active
             if len(trace) >= 3 and last.get("mode") == want_mode and active_ok:
                 break
-        phases.append({
-            "profile": profile, "expected_mode": want_mode, "expected_active": want_active,
-            "observed": last, "trace": trace, "cycles": len(trace),
-            "pass": last.get("mode") == want_mode and active_ok,
-        })
+        phases.append(
+            {
+                "profile": profile,
+                "expected_mode": want_mode,
+                "expected_active": want_active,
+                "observed": last,
+                "trace": trace,
+                "cycles": len(trace),
+                "pass": last.get("mode") == want_mode and active_ok,
+            }
+        )
         print("brain", profile, last, flush=True)
     censor("open")
     return {"phases": phases, "pass": all(p["pass"] for p in phases)}
 
 
 def cell(r: dict) -> str:
+    """Compact cell: p50/p95 of the small requests, 2 MB time; success shown when < 100 %."""
     if not r.get("ok"):
         return "❌"
-    media = f", 2MB {r['media_s']}s" if r.get("media_ok") else ", 2MB ❌"
-    return (f"✅ {int(r['success'] * 100)}% ttfb {r['ttfb_p50_ms']} "
-            f"p50 {r['p50_ms']} p95 {r['p95_ms']}{media}")
+    ok = "" if r["success"] >= 1 else f" ({int(r['success'] * 100)}%)"
+    media = f"{r['media_s']}s" if r.get("media_ok") else "❌"
+    return f"✅ {r['p50_ms']:.0f}/{r['p95_ms']:.0f} · {media}{ok}"
 
 
 def write_md(data: dict) -> None:
@@ -221,21 +319,29 @@ def write_md(data: dict) -> None:
         "",
         f"Generated {data['generated']} by `lab/run.sh` (WSL2 netns, see README for limits).",
         f"Workload per cell: {SMALL_N} small HTTPS GETs (2 KB, {CONC} concurrent) + one 2 MB "
-        "fetch through the path to the cover server. Times in ms.",
+        "fetch through the path to the cover server. Cell: small p50/p95 ms · 2 MB seconds. "
+        "Fresh client processes per row. `intl:` rows censor the international gateway "
+        "(client leg open).",
         "",
         "| profile | " + " | ".join(PATHS) + " |",
         "|---|" + "---|" * len(PATHS),
     ]
     for profile, row in data["matrix"].items():
         lines.append(f"| {profile} | " + " | ".join(cell(row[p]) for p in PATHS) + " |")
-    lines += ["", "## Brain / oracle failover", "",
-              "| censor profile | expected mode / active | observed | cycles | pass |",
-              "|---|---|---|---|---|"]
+    lines += [
+        "",
+        "## Brain / oracle failover",
+        "",
+        "| censor profile | expected mode / active | observed | cycles | pass |",
+        "|---|---|---|---|---|",
+    ]
     for ph in data["brain"]["phases"]:
         o = ph["observed"]
-        lines.append(f"| {ph['profile']} | {ph['expected_mode']} / {ph['expected_active']} | "
-                     f"{o.get('mode')} / {o.get('active')} | {ph.get('cycles')} | "
-                     f"{'✅' if ph['pass'] else '❌'} |")
+        lines.append(
+            f"| {ph['profile']} | {ph['expected_mode']} / {ph['expected_active']} | "
+            f"{o.get('mode')} / {o.get('active')} | {ph.get('cycles')} | "
+            f"{'✅' if ph['pass'] else '❌'} |"
+        )
     (HERE / "RESULTS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
@@ -243,18 +349,19 @@ def main() -> int:
     state, eps = endpoints()
     user = state.users[0]
     assert state.hysteria2 is not None
-    with (
-        XrayProbeSession(str(BIN / "xray"), eps, user, target=HTTP_TARGET) as xray,
-        Hy2ProbeSession(str(BIN / "hysteria"), state.hysteria2, "10.0.4.2", user) as hy2,
-    ):
-        time.sleep(2)
-        only = sys.argv[1:] or ["matrix", "brain"]
-        data = {"generated": time.strftime("%Y-%m-%d %H:%M %Z"), "matrix": {}, "brain": {}}
-        if "matrix" in only:
-            data["matrix"] = matrix(xray, hy2)
-        if "brain" in only:
+    only = sys.argv[1:] or ["matrix", "brain"]
+    data = {"generated": time.strftime("%Y-%m-%d %H:%M %Z"), "matrix": {}, "brain": {}}
+    if "matrix" in only:
+        data["matrix"] = matrix(state, eps)
+    if "brain" in only:
+        censor("open")
+        with (
+            XrayProbeSession(str(BIN / "xray"), eps, user, target=HTTP_TARGET) as xray,
+            Hy2ProbeSession(str(BIN / "hysteria"), state.hysteria2, "10.0.4.2", user) as hy2,
+        ):
+            time.sleep(2)
             data["brain"] = brain_scenario(xray, hy2, eps)
-    (HERE / "results.json").write_text(json.dumps(data, indent=2) + "\n")
+    (HERE / "results.json").write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     if data["matrix"] and data["brain"]:
         write_md(data)
     return 0 if not data["brain"] or data["brain"]["pass"] else 1

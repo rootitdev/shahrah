@@ -11,4 +11,5 @@ teardown() { "$HERE/planes.sh" down || true; "$HERE/topo.sh" down || true; }
 [[ -n "${KEEP:-}" ]] || trap teardown EXIT
 "$HERE/topo.sh" up
 "$HERE/planes.sh" up
-ip netns exec client python3 "$HERE/measure.py" "$@"
+# Go (Xray) and Python trust the lab CA for the cdn.lab edge through SSL_CERT_FILE
+ip netns exec client env SSL_CERT_FILE=/run/shahrah-lab/ca.crt python3 "$HERE/measure.py" "$@"
