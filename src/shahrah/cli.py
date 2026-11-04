@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import (
@@ -769,10 +770,12 @@ def _run_brain(args: argparse.Namespace) -> int:
                 session.start()
             if args.social_probe:
                 live = session
-                return [
-                    probe_weighted(ep.name, lambda t, n=ep.name: live.probe(n, 10.0, target=t))
-                    for ep in config.endpoints
-                ]
+
+                def one(name: str) -> ProbeResult:
+                    return probe_weighted(name, lambda t: live.probe(name, 8.0, target=t))
+
+                with ThreadPoolExecutor(max_workers=len(config.endpoints)) as pool:
+                    return list(pool.map(one, [ep.name for ep in config.endpoints]))
             return session.probe_all()
         except (ProbeError, OSError) as exc:
             if session is not None:
