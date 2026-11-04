@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import functools
 import json
 import logging
@@ -33,6 +34,7 @@ from . import (
     provision,
     readycheck,
     settle,
+    sni_bank,
     sni_scout,
     sni_watch,
     subserve,
@@ -240,6 +242,11 @@ def _build_parser() -> argparse.ArgumentParser:
     ready.add_argument(
         "--strict-sni", action="store_true", help="--sni-dns: accept only own-domain"
     )
+    ready.add_argument(
+        "--sni-bank",
+        type=Path,
+        help="fail links whose SNI is unknown, expired or low-scoring in this SNI bank",
+    )
 
     panel = sub.add_parser("panel", help="one-time setup of a PasarGuard panel (owner key)")
     panel.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
@@ -335,6 +342,39 @@ def _build_parser() -> argparse.ArgumentParser:
         help="with --node-ip: accept only an own domain resolving to the node IP",
     )
     scout.add_argument("--json", action="store_true", help="machine-readable output")
+
+    bank = sub.add_parser(
+        "sni-bank",
+        help="scored, expiring bank of SNI candidates (seed/add/refresh/list/rotate/vantage)",
+    )
+    bank.add_argument(
+        "--bank", type=Path, default=None, help="bank file (default: next to the state file)"
+    )
+    bank.add_argument("--ttl-hours", type=float, default=sni_bank.DEFAULT_TTL_S / 3600)
+    bsub = bank.add_subparsers(dest="bank_command", required=True)
+    b_seed = bsub.add_parser("seed", help="add the built-in Iran + foreign seed names")
+    b_seed.add_argument("--node-ip", help="public IP the SNI must be plausible for")
+    b_add = bsub.add_parser("add", help="add candidate domain names")
+    b_add.add_argument("hosts", nargs="+")
+    b_add.add_argument("--region", choices=sni_bank.REGIONS, default="foreign")
+    b_add.add_argument("--node-ip", help="public IP the SNI must be plausible for")
+    b_ref = bsub.add_parser("refresh", help="re-verify due candidates from this host (the exit)")
+    b_ref.add_argument("--all", action="store_true", help="re-verify everything, not just due")
+    b_ref.add_argument("--timeout", type=float, default=5.0)
+    b_list = bsub.add_parser("list", help="score and list candidates, best first")
+    b_list.add_argument("--region", choices=sni_bank.REGIONS)
+    b_list.add_argument("--strict-dns", action="store_true")
+    b_list.add_argument("--json", action="store_true")
+    b_rot = bsub.add_parser("rotate", help="say (or --apply) whether the active SNI should move")
+    b_rot.add_argument("--region", choices=sni_bank.REGIONS, default="foreign")
+    b_rot.add_argument("--apply", action="store_true", help="record the pick as active")
+    b_rep = bsub.add_parser("report", help="write this vantage's SNI report (run in Iran)")
+    b_rep.add_argument("--vantage", required=True)
+    b_rep.add_argument("--asn", type=int)
+    b_rep.add_argument("--timeout", type=float, default=5.0)
+    b_rep.add_argument("--out", type=Path, required=True)
+    b_merge = bsub.add_parser("merge", help="fold vantage SNI reports into the bank")
+    b_merge.add_argument("reports", nargs="+", type=Path)
 
     retarget = sub.add_parser(
         "retarget", help="change the REALITY target / SNI (then apply + restart)"
@@ -1161,11 +1201,23 @@ def _run(args: argparse.Namespace) -> int:
             if any(not c.accepted(strict=args.strict_sni) for c in sni_checks):
                 report.ok = False
                 data["ok"] = False
+        bank_problems = (
+            readycheck.check_sni_bank(body, sni_bank.load_bank(args.sni_bank), time.time())
+            if args.sni_bank
+            else []
+        )
+        if args.sni_bank:
+            data["sni_bank"] = [{"sni": s, "problem": p} for s, p in bank_problems]
+            if bank_problems:
+                report.ok = False
+                data["ok"] = False
         if args.json:
             out.write(json.dumps(data, indent=2) + "\n")
         else:
             mark = "PASS" if report.ok else "FAIL"
             out.write(f"ready-check {mark} links={report.link_count}\n")
+            for sni, problem in bank_problems:
+                out.write(f"  NO sni-bank {sni}: {problem}\n")
             for item in report.links:
                 flag = "ok" if item.ok else "NO"
                 detail = f"  {item.detail}" if item.detail else ""
@@ -1359,6 +1411,9 @@ def _run(args: argparse.Namespace) -> int:
         out.write(f"settle webhook on http://{host or '127.0.0.1'}:{port}/hooks/payment\n")
         settle.serve(args.secret, credit, host=host or "127.0.0.1", port=port)
         return 0
+
+    if args.command == "sni-bank":
+        return _sni_bank(args, out)
 
     if args.command == "sni-scout":
         results = sni_scout.scout(
@@ -1580,3 +1635,86 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def _sni_bank(args: argparse.Namespace, out: TextIO) -> int:
+    """``shahrah sni-bank``: hostnames and scores only, never secrets."""
+    from . import sni_dns
+
+    path = args.bank or Path(args.state).with_name("sni-bank.json")
+    ttl = args.ttl_hours * 3600
+    now = time.time()
+    bank = sni_bank.load_bank(path)
+    cmd = args.bank_command
+    if cmd in {"seed", "add"}:
+        if args.node_ip:
+            sni_dns.check("example.invalid", args.node_ip, lambda _n: [])  # validates the IP
+            bank = dataclasses.replace(bank, node_ip=args.node_ip)
+        if cmd == "seed":
+            for region, hosts in sni_bank.SEED_CANDIDATES.items():
+                bank = bank.add(hosts, region, now)
+        else:
+            bank = bank.add(args.hosts, args.region, now)
+        sni_bank.save_bank(path, bank)
+        out.write(f"{len(bank.candidates)} candidates in {path}\n")
+        return 0
+    if cmd == "refresh":
+        bank = sni_bank.refresh(
+            bank,
+            now,
+            only_due=not args.all,
+            ttl_s=ttl,
+            timeout_s=args.timeout,
+            resolver=sni_dns.system_resolver,
+        )
+        sni_bank.save_bank(path, bank)
+        cmd, args.region, args.strict_dns, args.json = "list", None, False, False
+    if cmd == "list":
+        scores = bank.ranked(now, region=args.region, ttl_s=ttl, strict_dns=args.strict_dns)
+        if args.json:
+            rows = [
+                {
+                    "host": s.host,
+                    "region": bank.get(s.host).region,
+                    "score": s.total,  # type: ignore[union-attr]
+                    "usable": s.usable,
+                    "expired": s.expired,
+                    "factors": dict(s.factors),
+                    "reasons": list(s.reasons),
+                }
+                for s in scores
+            ]
+            out.write(json.dumps(rows, indent=2) + "\n")
+        else:
+            for s in scores:
+                flag = "ok " if s.usable else ("EXP" if s.expired else "NO ")
+                region = bank.get(s.host).region  # type: ignore[union-attr]
+                out.write(
+                    f"{flag} {s.total:5.1f}  {region:7}  {s.host:36}  {'; '.join(s.reasons)}\n"
+                )
+        return 0 if any(s.usable for s in scores) else 1
+    if cmd == "rotate":
+        rot = sni_bank.rotation(bank, args.region, now, ttl_s=ttl)
+        out.write(
+            f"{args.region}: current={rot.current or '-'} pick={rot.pick or '-'} "
+            f"rotate={'yes' if rot.rotate else 'no'} ({rot.reason})\n"
+        )
+        if rot.rotate and rot.pick and args.apply:
+            sni_bank.save_bank(path, sni_bank.activate(bank, args.region, rot.pick))
+            out.write(
+                f"active {args.region} SNI -> {rot.pick}; next: shahrah retarget {rot.pick}\n"
+            )
+        return 0 if rot.pick else 1
+    if cmd == "report":
+        results = [sni_scout._handshake(c.host, 443, args.timeout) for c in bank.candidates]
+        report = sni_bank.build_vantage_report(results, vantage=args.vantage, asn=args.asn, now=now)
+        args.out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        out.write(f"wrote {len(results)} results to {args.out}\n")
+        return 0
+    if cmd == "merge":
+        for rep in args.reports:
+            bank = sni_bank.merge_vantage_report(bank, json.loads(rep.read_text()), now=now)
+        sni_bank.save_bank(path, bank)
+        out.write(f"merged {len(args.reports)} report(s)\n")
+        return 0
+    raise ConfigError(f"unknown sni-bank command {cmd!r}")

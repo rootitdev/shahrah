@@ -20,10 +20,11 @@ import hashlib
 import hmac
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from typing import Any
 
+from . import sni_bank
 from .models import CRISIS_PORTS, ConfigError, Endpoint, validate_host, validate_port
 from .oracle import Mode
 
@@ -282,3 +283,26 @@ def verify(
     if bundle.serial < min_serial:
         raise ConfigError("tactics bundle is older than the one already held (replay)")
     return bundle
+
+
+def with_bank_snis(profile: TacticsProfile, bank: sni_bank.SniBank, now: float) -> TacticsProfile:
+    """Refresh ``sni_allowlist`` from fresh per-ASN vantage reports in the SNI bank.
+
+    Names the bank saw pass on the profile's ASNs come first (best score first), followed by
+    any operator-pinned names that were not seen blocked. A profile without ASNs is left as is.
+    """
+    if not profile.asns:
+        return profile
+    seen: list[str] = []
+    for asn in profile.asns:
+        for host in sni_bank.passing_snis(bank, asn, now):
+            if host not in seen:
+                seen.append(host)
+    for host in profile.sni_allowlist:
+        cand = bank.get(host)
+        blocked = cand is not None and any(
+            o.blocked and o.asn in profile.asns for o in cand.observations
+        )
+        if host not in seen and not blocked:
+            seen.append(host)
+    return replace(profile, sni_allowlist=tuple(seen))

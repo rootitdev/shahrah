@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import sni_dns
+from . import sni_bank, sni_dns
 from .models import ConfigError, is_ip
 
 _VLESS = re.compile(r"^vless://", re.IGNORECASE)
@@ -149,3 +149,36 @@ def check_sni_dns(
         addresses = [host] if is_ip(host) else list(resolver(host))
         checks.extend(sni_dns.check(qs["sni"], ip, resolver) for ip in addresses)
     return checks
+
+
+def link_snis(body: str) -> list[str]:
+    """SNIs of every REALITY link in a subscription body (order kept, no duplicates)."""
+    seen: list[str] = []
+    for link in decode_subscription(body):
+        if not _VLESS.match(link):
+            continue
+        qs = {k: (v[0] if v else "") for k, v in parse_qs(urlparse(link).query).items()}
+        sni = qs.get("sni", "")
+        if qs.get("security") == "reality" and sni and sni not in seen:
+            seen.append(sni)
+    return seen
+
+
+def check_sni_bank(body: str, bank: sni_bank.SniBank, now: float) -> list[tuple[str, str]]:
+    """Problems with the SNIs a subscription ships, judged by the SNI bank: (sni, problem).
+
+    Flags names the bank does not know, names whose verification expired (field reports: some
+    die in under 24 h) and names that scored below the pick threshold (e.g. a block sighting).
+    """
+    problems: list[tuple[str, str]] = []
+    for sni in link_snis(body):
+        cand = bank.get(sni)
+        if cand is None:
+            problems.append((sni, "not in the SNI bank (unverified)"))
+            continue
+        sc = sni_bank.score(cand, now)
+        if sc.expired:
+            problems.append((sni, "verification expired: run `shahrah sni-bank refresh`"))
+        elif not sc.usable:
+            problems.append((sni, f"score {sc.total}: {'; '.join(sc.reasons)}"))
+    return problems
