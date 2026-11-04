@@ -516,6 +516,7 @@ def _build_parser() -> argparse.ArgumentParser:
     wwp.add_argument("--tunnel-port", type=int, default=8443)
     wwp.add_argument("--exit-service", default="127.0.0.1:443", help="Xray on the exit")
     wwp.add_argument("--cover-sni", default="www.speedtest.net")
+    wwp.add_argument("--cover-addr", default="", help="pinned cover IP (skip DNS per handshake)")
     wwp.add_argument("--pool", type=int, default=8, help="reverse: idle warm connections")
     wwp.add_argument("--open-peer", action="store_true", help="do not whitelist the peer IP")
     wwp.add_argument("--workdir", default="/etc/shahrah/waterwall")
@@ -1069,6 +1070,7 @@ def _run_waterwall(args: argparse.Namespace, out: TextIO) -> int:
         exit_ip=args.exit_ip,
         password=args.key_file.read_text(encoding="utf-8").strip(),
         cover_sni=args.cover_sni,
+        cover_addr=args.cover_addr,
         mode=args.mode,
         user_ports=tuple(args.user_port or [443]),
         tunnel_port=args.tunnel_port,

@@ -70,6 +70,19 @@ def _fetch(port: int, attempts: int = 2) -> bytes | None:
     return None
 
 
+COVER_ADDR = ""
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _resolve_cover_once() -> None:
+    """Resolve the cover once, like an operator pinning ``--cover-addr``."""
+    global COVER_ADDR
+    try:
+        COVER_ADDR = socket.getaddrinfo(COVER, 443, socket.AF_INET)[0][4][0]
+    except OSError:
+        COVER_ADDR = ""
+
+
 @pytest.mark.parametrize("mode", ["reverse", "direct"])
 def test_backhaul_carries_traffic(tmp_path: Path, mode: str) -> None:
     http = ThreadingHTTPServer(("127.0.0.1", 0), _Ok)
@@ -82,6 +95,7 @@ def test_backhaul_carries_traffic(tmp_path: Path, mode: str) -> None:
             exit_ip="127.0.0.1",
             password=password,
             cover_sni=COVER,
+            cover_addr=COVER_ADDR,
             mode=mode,
             user_ports=(user_port,),
             tunnel_port=tunnel_port,

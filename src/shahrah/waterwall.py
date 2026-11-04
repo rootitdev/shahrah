@@ -20,7 +20,8 @@ Modes:
 * ``direct`` - Iran dials the exit (simpler; use when Iran inbound from abroad is filtered).
 
 ``cover_sni`` is dialled by the RealityServer side (Iran in reverse mode) on every leg
-handshake, so it must be fast from that network; a slow cover makes direct mode time out.
+handshake. Set ``cover_addr`` to a pinned IP to skip DNS there: Iranian resolvers are slow or
+poisoned, and a slow lookup (8 s in the WSL smoke) made direct mode time out.
 
 The tunnel listener only accepts the peer's address (``whitelist``): the ops logs showed the
 backhaul port being found and hammered when left open to everyone (docs/DIAG_LESSONS.md).
@@ -54,6 +55,7 @@ class Backhaul:
     exit_ip: str
     password: str  # WaterWall Reality secret: 1..32 bytes
     cover_sni: str = "www.speedtest.net"
+    cover_addr: str = ""  # optional IP for the cover site (no DNS per handshake)
     mode: str = "reverse"
     user_ports: tuple[int, ...] = (443,)  # Iran ports users dial
     tunnel_port: int = 8443  # inter-server leg
@@ -72,6 +74,11 @@ class Backhaul:
         if not 16 <= len(self.password.encode()) <= 32 or any(c in self.password for c in '"\\'):
             raise ConfigError("backhaul password must be 16..32 bytes (WaterWall Reality limit)")
         validate_host(self.cover_sni, "cover sni")
+        if self.cover_addr:
+            try:
+                ipaddress.ip_address(self.cover_addr)
+            except ValueError as exc:
+                raise ConfigError(f"cover_addr must be an IP address: {self.cover_addr!r}") from exc
         if is_ip(self.cover_sni):
             raise ConfigError("cover_sni must be a domain name")
         if self.mode not in MODES:
@@ -137,7 +144,7 @@ def _ports(b: Backhaul) -> int | list[int]:
 
 def render_iran(b: Backhaul) -> dict[str, Any]:
     """Chain for the Iran server."""
-    cover = _connector("bh-cover", b.cover_sni, 443)
+    cover = _connector("bh-cover", b.cover_addr or b.cover_sni, 443)
     if b.mode == "direct":
         nodes = [
             _listener(b, "users", _ports(b), "bh-reality-client", None),
@@ -165,7 +172,7 @@ def render_exit(b: Backhaul) -> dict[str, Any]:
             _listener(b, "from-iran", b.tunnel_port, "bh-reality-server", b.iran_ip),
             _reality(b, "server", "service"),
             _connector("service", host, port),
-            _connector("bh-cover", b.cover_sni, 443),
+            _connector("bh-cover", b.cover_addr or b.cover_sni, 443),
         ]
     else:
         nodes = [

@@ -55,6 +55,8 @@ WW_PEER=""
 WW_SELF=""
 WW_MODE="reverse"
 WW_TUNNEL_PORT="8443"
+WW_COVER_SNI="www.speedtest.net"
+WW_COVER_ADDR=""
 WORK_DIR=""
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 
@@ -88,6 +90,8 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --ww-mode MODE    reverse (default: exit dials Iran) or direct
   --ww-tunnel-port PORT
                     inter-server leg port (default 8443)
+  --ww-cover SNI[@IP]
+                    cover site for the backhaul Reality leg; @IP pins it (no DNS per handshake)
   -h, --help        show this help
 EOF
 }
@@ -112,6 +116,7 @@ parse_args() {
       --ww-self) WW_SELF="${2:?--ww-self needs an IP}"; shift 2 ;;
       --ww-mode) WW_MODE="${2:?--ww-mode needs reverse or direct}"; shift 2 ;;
       --ww-tunnel-port) WW_TUNNEL_PORT="${2:?--ww-tunnel-port needs a PORT}"; shift 2 ;;
+      --ww-cover) WW_COVER_SNI="${2%%@*}"; [[ "$2" == *@* ]] && WW_COVER_ADDR="${2#*@}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) usage >&2; die "unknown option: $1" ;;
     esac
@@ -332,7 +337,8 @@ install_waterwall() {
   install -d -m 0750 "$CONF_DIR/waterwall"
   shahrah waterwall-config "$WW_SIDE" --iran-ip "$iran_ip" --exit-ip "$exit_ip" \
     --key-file "$CONF_DIR/backhaul.key" --mode "$WW_MODE" --tunnel-port "$WW_TUNNEL_PORT" \
-    --exit-service "$service" --out-dir "$CONF_DIR/waterwall" >/dev/null
+    --exit-service "$service" --cover-sni "$WW_COVER_SNI" ${WW_COVER_ADDR:+--cover-addr "$WW_COVER_ADDR"} \
+    --out-dir "$CONF_DIR/waterwall" >/dev/null
   shahrah waterwall-config unit --workdir "$CONF_DIR/waterwall" > /etc/systemd/system/shahrah-waterwall.service
   if [[ "$FIREWALL" -eq 1 ]] && command -v ufw >/dev/null; then
     if [[ "$WW_SIDE" == iran ]]; then

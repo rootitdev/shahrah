@@ -62,6 +62,16 @@ def test_direct_mode_chains() -> None:
     assert lst["settings"]["whitelist"] == ["198.51.100.7/32"]
 
 
+def test_cover_addr_skips_dns() -> None:
+    cfg = ww.render_iran(_bh(cover_addr="192.0.2.80"))
+    cover = next(n for n in cfg["nodes"] if n["name"] == "bh-cover")
+    assert cover["settings"]["address"] == "192.0.2.80"
+    reality = next(n for n in cfg["nodes"] if n["type"] == "RealityServer")
+    assert reality["settings"]["destination"] == "bh-cover"
+    with pytest.raises(ConfigError):
+        _bh(cover_addr="cover.example.org")
+
+
 def test_open_peer_when_asked() -> None:
     iran = ww.render_iran(_bh(restrict_peer=False))
     assert all("whitelist" not in n["settings"] for n in iran["nodes"])
