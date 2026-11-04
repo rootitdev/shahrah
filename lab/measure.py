@@ -92,7 +92,7 @@ class PlainHy2(Hy2ProbeSession):
         orig = hy2mod.render_client
 
         def plain(*a, **kw):  # noqa: ANN002, ANN003, ANN202
-            return re.sub(r"(?ms)^obfs:\n(?:  .*\n)+", "", orig(*a, **kw))
+            return re.sub(r"(?m)^obfs:\n(?:  .*\n)+", "", orig(*a, **kw))
 
         hy2mod.render_client = plain
         try:

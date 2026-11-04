@@ -41,7 +41,9 @@ def main() -> int:
     cert, key, host, port = sys.argv[1:5]
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(cert, key)
-    ctx.set_alpn_protocols(["http/1.1"])
+    # Xray picks HTTP/2 for XHTTP when h2 is offered; the bytes go on to the origin unchanged,
+    # which speaks h2c (prior knowledge) as well as HTTP/1.1, like a CDN talking h2 to origin.
+    ctx.set_alpn_protocols(["h2", "http/1.1"])
     srv = socket.create_server(("0.0.0.0", 443), backlog=256)
     print("cdn edge on :443 ->", host, port, flush=True)
     while True:
