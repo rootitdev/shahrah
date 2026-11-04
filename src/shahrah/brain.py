@@ -36,6 +36,43 @@ ModeHook = Callable[[Mode, Mode], None]
 CRISIS_MODES = frozenset({Mode.RESTRICTED, Mode.OUTAGE})
 
 
+SIDECAR_KINDS = frozenset({"hysteria2", "paqet"})
+
+
+@dataclass(frozen=True, slots=True)
+class Sidecar:
+    """A non-Xray data plane probed through the loopback SOCKS port of its local client.
+
+    * ``hysteria2`` - QUIC/UDP social path; ordinary (UDP dies first under an allowlist).
+    * ``paqet`` - raw-packet rescue path; lockdown-capable and ``on_demand``: its client only
+      runs in a crisis (started by the mode hook), so outside a crisis it is not a path at all
+      and cannot drag the mode down to "degraded".
+    """
+
+    name: str
+    kind: str
+    socks_port: int
+    priority: int = 50
+    lockdown_capable: bool | None = None  # None = kind default
+    on_demand: bool | None = None  # None = kind default
+
+    def __post_init__(self) -> None:
+        if self.kind not in SIDECAR_KINDS:
+            raise ConfigError(f"sidecar kind must be one of {sorted(SIDECAR_KINDS)}")
+        if not self.name.strip():
+            raise ConfigError("sidecar name must not be empty")
+        if not 1 <= self.socks_port <= 65535:
+            raise ConfigError("sidecar socks_port must be 1..65535")
+        paqet = self.kind == "paqet"
+        if self.lockdown_capable is None:
+            object.__setattr__(self, "lockdown_capable", paqet)
+        if self.on_demand is None:
+            object.__setattr__(self, "on_demand", paqet)
+
+    def spec(self) -> PathSpec:
+        return PathSpec(self.name, self.priority, bool(self.lockdown_capable))
+
+
 @dataclass(frozen=True, slots=True)
 class BrainConfig:
     """Public routing data only. Secrets (panel API key) come from the environment."""
@@ -47,6 +84,7 @@ class BrainConfig:
     oracle: OracleConfig = field(default_factory=OracleConfig)
     burn: BurnConfig = field(default_factory=BurnConfig)
     standby: tuple[str, ...] = ()  # spare endpoints, in promotion order (see rotation.py)
+    sidecars: tuple[Sidecar, ...] = ()  # hysteria2 / paqet paths (see Sidecar)
 
     def __post_init__(self) -> None:
         if not self.endpoints:
@@ -65,14 +103,19 @@ class BrainConfig:
         unknown = set(self.remarks) - set(names)
         if unknown:
             raise ConfigError(f"remarks refer to unknown endpoints: {sorted(unknown)}")
+        all_names = names + [s.name for s in self.sidecars]
+        if len(set(all_names)) != len(all_names):
+            raise ConfigError("sidecar names must be unique and differ from endpoint names")
         if self.interval_s < 5:
             raise ConfigError("interval_s below 5 seconds would hammer the servers")
 
-    def specs(self) -> list[PathSpec]:
-        return [
+    def specs(self, *, crisis: bool = False) -> list[PathSpec]:
+        """Oracle paths. On-demand sidecars (paqet) only exist while in a crisis."""
+        base = [
             PathSpec(e.name, priority=e.priority, lockdown_capable=e.lockdown_capable)
             for e in self.endpoints
         ]
+        return base + [s.spec() for s in self.sidecars if crisis or not s.on_demand]
 
     @classmethod
     def from_json(cls, text: str) -> BrainConfig:
@@ -93,6 +136,7 @@ class BrainConfig:
                 oracle=oracle,
                 burn=burn,
                 standby=tuple(data.get("standby", ())),
+                sidecars=tuple(Sidecar(**item) for item in data.get("sidecars", ())),
             )
         except (KeyError, TypeError, ValueError) as exc:
             if isinstance(exc, ConfigError):
@@ -114,7 +158,6 @@ class Brain:
         on_mode_change: ModeHook | None = None,
     ) -> None:
         self._config = config
-        self._specs = config.specs()
         self._probe_round = probe_round
         self._panel_sync = panel_sync
         self._clock = clock
@@ -142,9 +185,13 @@ class Brain:
         except ProbeError as exc:
             log.error("probe machinery failed, skipping cycle: %s", exc)
             return None
-        probes = [Probe(r.endpoint, r.ok, r.latency_ms) for r in results]
         previous_mode = self._state.mode
-        decision = step(self._config.oracle, self._state, self._specs, probes, self._clock())
+        specs = self._config.specs(crisis=previous_mode in CRISIS_MODES)
+        known = {spec.name for spec in specs}
+        # Results for an on-demand sidecar outside a crisis are noise (its client is stopped).
+        results = [r for r in results if r.endpoint in known]
+        probes = [Probe(r.endpoint, r.ok, r.latency_ms) for r in results]
+        decision = step(self._config.oracle, self._state, specs, probes, self._clock())
         self._state = decision.state
 
         for result in results:

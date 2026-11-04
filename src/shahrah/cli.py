@@ -43,7 +43,14 @@ from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
 from .panel import PanelClient, PanelError, sync
-from .prober import ProbeError, ProbeResult, ProbeTarget, XrayProbeSession, probe_weighted
+from .prober import (
+    ProbeError,
+    ProbeResult,
+    ProbeTarget,
+    XrayProbeSession,
+    probe_socks,
+    probe_weighted,
+)
 from .roles import brain_role, sales_manager_role
 from .state import NodeState, load_state, save_state, write_private_file
 from .xray_config import dumps, render_server_config
@@ -800,15 +807,22 @@ def _run_brain(args: argparse.Namespace) -> int:
             if session is None:
                 session = XrayProbeSession(args.xray_bin, config.endpoints, config.probe_user)
                 session.start()
-            if args.social_probe:
-                live = session
+            live = session
+            ports = {s.name: s.socks_port for s in config.sidecars}
 
-                def one(name: str) -> ProbeResult:
-                    return probe_weighted(name, lambda t: live.probe(name, 8.0, target=t))
+            def fetch(name: str, target: ProbeTarget | None) -> ProbeResult:
+                if name in ports:  # hysteria2 / paqet client on a loopback SOCKS port
+                    return probe_socks(name, ports[name], target)
+                return live.probe(name, 8.0, target=target)
 
-                with ThreadPoolExecutor(max_workers=len(config.endpoints)) as pool:
-                    return list(pool.map(one, [ep.name for ep in config.endpoints]))
-            return session.probe_all()
+            def one(name: str) -> ProbeResult:
+                if args.social_probe:
+                    return probe_weighted(name, lambda t: fetch(name, t))
+                return fetch(name, None)
+
+            names = [ep.name for ep in config.endpoints] + list(ports)
+            with ThreadPoolExecutor(max_workers=len(names)) as pool:
+                return list(pool.map(one, names))
         except (ProbeError, OSError) as exc:
             if session is not None:
                 session.stop()
