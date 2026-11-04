@@ -56,12 +56,16 @@ def _start(tmp: Path, name: str, cfg: dict) -> subprocess.Popen[bytes]:
     )
 
 
-def _fetch(port: int) -> bytes | None:
-    try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=6) as r:
-            return r.read()
-    except OSError:
-        return None
+def _fetch(port: int, attempts: int = 2) -> bytes | None:
+    # Each direct-mode connection does a real TLS handshake with the cover site over the
+    # internet, so allow one retry for a network hiccup.
+    for _ in range(attempts):
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=6) as r:
+                return r.read()
+        except OSError:
+            time.sleep(0.5)
+    return None
 
 
 @pytest.mark.parametrize("mode", ["reverse", "direct"])
