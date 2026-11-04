@@ -66,6 +66,47 @@ def parse_sni(payload: bytes) -> str | None:
     return None
 
 
+def flow_key(ip_packet: bytes) -> tuple[bytes, bytes] | None:
+    """(src ip+port, dst ip+port) of an IPv4/TCP packet, for per-flow reassembly."""
+    if len(ip_packet) < 20 or ip_packet[9] != 6:
+        return None
+    ihl = (ip_packet[0] & 0x0F) * 4
+    return ip_packet[12:16] + ip_packet[ihl : ihl + 2], ip_packet[16:20] + ip_packet[
+        ihl + 2 : ihl + 4
+    ]
+
+
+class HelloReassembler:
+    """Joins a ClientHello split over several TCP segments.
+
+    Chrome-like hellos carrying a post-quantum key share (X25519MLKEM768, ~1.2 KB) do not fit
+    one segment, and with randomised extension order the SNI lands in the second segment about
+    half the time; a single-segment parser lets those flows through (found in the lab).
+    """
+
+    MAX = 16 * 1024 + 5
+
+    def __init__(self) -> None:
+        self._buf: dict[tuple[bytes, bytes], bytes] = {}
+
+    def feed(self, key: tuple[bytes, bytes] | None, payload: bytes) -> str | None:
+        if key is None or not payload:
+            return None
+        if key in self._buf:
+            data = self._buf.pop(key) + payload
+        elif payload[0] == 0x16 and len(payload) >= 6 and payload[5] == 0x01:
+            data = payload
+        else:
+            return None
+        need = 5 + int.from_bytes(data[3:5], "big") if len(data) >= 5 else self.MAX
+        if len(data) < min(need, self.MAX):
+            if len(self._buf) > 4096:  # bound memory against floods of half-hellos
+                self._buf.clear()
+            self._buf[key] = data
+            return None
+        return parse_sni(data)
+
+
 def load_allowlist(path: Path) -> dict[str, set[str]]:
     table: dict[str, set[str]] = {}
     for line in path.read_text().splitlines():
@@ -121,6 +162,7 @@ def run(queue: int, allow: dict[str, set[str]]) -> None:
     params = struct.pack("!IB", 0xFFFF, 2)  # copy whole packet
     sock.send(_msg(MSG_CONFIG, queue, _attr(CFG_PARAMS, params), NLM_F_REQUEST | NLM_F_ACK))
     print(f"dpi: bound to queue {queue}, allowlist {sorted(allow)}", flush=True)
+    hellos = HelloReassembler()
     while True:
         data = sock.recv(1 << 17)
         pos = 0
@@ -131,8 +173,9 @@ def run(queue: int, allow: dict[str, set[str]]) -> None:
             if kind == (NFNL_SUBSYS_QUEUE << 8) | MSG_PACKET:
                 attrs = _attrs(data[pos + 20 : pos + length])
                 pkt_id = struct.unpack("!I", attrs[A_PACKET_HDR][:4])[0]
-                dst, payload = tcp_payload(attrs.get(A_PAYLOAD, b""))
-                sni = parse_sni(payload)
+                packet = attrs.get(A_PAYLOAD, b"")
+                dst, payload = tcp_payload(packet)
+                sni = hellos.feed(flow_key(packet), payload)
                 verdict = decide(sni, dst, allow)
                 if sni is not None:
                     print(f"dpi: {sni} -> {dst}: {verdict}", flush=True)

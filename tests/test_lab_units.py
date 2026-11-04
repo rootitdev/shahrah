@@ -57,6 +57,17 @@ def test_sni_is_parsed_from_a_real_client_hello() -> None:
     assert dpi.parse_sni(b"GET / HTTP/1.1\r\n") is None
 
 
+def test_sni_found_when_client_hello_spans_segments() -> None:
+    hello = _client_hello("blocked.example")
+    first, second = hello[:60], hello[60:]
+    asm = dpi.HelloReassembler()
+    key = (b"a", b"b")
+    assert dpi.parse_sni(first) is None
+    assert asm.feed(key, first) is None
+    assert asm.feed(key, second) == "blocked.example"
+    assert asm.feed((b"c", b"d"), b"GET / HTTP/1.1\r\n") is None
+
+
 def test_allowlist_and_sni_dns_mismatch() -> None:
     assert dpi.decide("cover.lab", "198.18.5.2", ALLOW) == "pass"
     assert dpi.decide("cover.lab", "10.0.4.2", ALLOW) == "block-mismatch"  # borrowed SNI
