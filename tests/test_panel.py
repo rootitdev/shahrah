@@ -92,6 +92,9 @@ def test_client_refuses_plain_http_to_remote_hosts() -> None:
         PanelClient("http://panel.example.org", "key")
     PanelClient("http://127.0.0.1:8000", "key")  # loopback is fine
     PanelClient("http://panel.example.org", "key", allow_insecure_http=True)
+    with pytest.raises(ConfigError, match="insecure_tls"):
+        PanelClient("https://panel.example.org", "key", insecure_tls=True)
+    PanelClient("https://127.0.0.1:8000", "key", insecure_tls=True)
 
 
 @pytest.mark.parametrize("url", ["panel.example.org", "ftp://panel.example.org", "https://"])
@@ -120,7 +123,12 @@ class FakePanel:
         self.calls: list[tuple[str, str]] = []
         self.roles: list[dict[str, Any]] = []
         self.templates: list[dict[str, Any]] = []
+        self.user_templates: list[dict[str, Any]] = [{"id": 7, "name": "basic"}]
         self.users: dict[str, dict[str, Any]] = {}
+        self.cores: list[dict[str, Any]] = [
+            {"id": 1, "name": "shahrah", "config": {"inbounds": [{"tag": "in-main"}]}}
+        ]
+        self.last_core_put: dict[str, Any] | None = None
         panel = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -149,14 +157,26 @@ class FakePanel:
                     self._reply(200, list(panel.hosts.values()))
                 elif method == "GET" and self.path == "/api/admin-roles":
                     self._reply(200, {"roles": panel.roles, "total": len(panel.roles)})
+                elif method == "GET" and self.path == "/api/user_templates":
+                    self._reply(200, list(panel.user_templates))
                 elif method == "POST" and self.path == "/api/admin-role":
                     panel.roles.append(body)
                     self._reply(201, body)
                 elif method == "GET" and self.path == "/api/client_templates":
                     self._reply(200, {"count": len(panel.templates), "templates": panel.templates})
                 elif method == "POST" and self.path == "/api/client_template":
+                    body = {**body, "id": len(panel.templates) + 1}
                     panel.templates.append(body)
                     self._reply(201, body)
+                elif method == "PUT" and self.path.startswith("/api/client_template/"):
+                    template_id = int(self.path.rsplit("/", 1)[1])
+                    for index, template in enumerate(panel.templates):
+                        if template.get("id") == template_id:
+                            panel.templates[index] = {**body, "id": template_id}
+                            self._reply(200, panel.templates[index])
+                            break
+                    else:
+                        self._reply(404, {"detail": "no such template"})
                 elif method == "GET" and self.path.startswith("/api/user/"):
                     user = panel.users.get(self.path.rsplit("/", 1)[1])
                     if user:
@@ -180,6 +200,16 @@ class FakePanel:
                     for host_id in body["ids"]:
                         panel.hosts[host_id]["is_disabled"] = disabled
                     self._reply(200, {"count": len(body["ids"])})
+                elif method == "GET" and self.path == "/api/cores":
+                    self._reply(200, {"cores": panel.cores, "count": len(panel.cores)})
+                elif method == "PUT" and self.path.startswith("/api/core/"):
+                    path, _, query = self.path.partition("?")
+                    core_id = int(path.rsplit("/", 1)[1])
+                    panel.last_core_put = {"body": body, "query": query}
+                    for core in panel.cores:
+                        if core["id"] == core_id:
+                            core["config"] = (body or {}).get("config", core["config"])
+                    self._reply(200, {"id": core_id})
                 else:
                     self._reply(404, {"detail": "not found"})
 
@@ -253,6 +283,17 @@ def test_wrong_api_key_raises_panel_error_without_leaking_it(panel: FakePanel) -
     assert "wrong-key-123" not in str(info.value)
 
 
+def test_update_core_puts_config_without_restart_by_default(panel: FakePanel) -> None:
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    client.update_core(
+        {"name": "shahrah", "type": "xray", "config": {"inbounds": [{"tag": "in-53"}]}},
+        restart_nodes=False,
+    )
+    assert panel.last_core_put is not None
+    assert panel.last_core_put["query"] == "restart_nodes=false"
+    assert panel.cores[0]["config"]["inbounds"][0]["tag"] == "in-53"
+
+
 def test_unreachable_panel_is_reported_cleanly() -> None:
     client = PanelClient("http://127.0.0.1:9", "key")  # discard port: nothing listens
     with pytest.raises(PanelError, match="unreachable"):
@@ -260,6 +301,11 @@ def test_unreachable_panel_is_reported_cleanly() -> None:
 
 
 PROBE_UUID = "5c1b2e0a-6f1d-4f43-9a38-3a3c9a4f9b11"
+
+
+def test_list_user_templates(panel: FakePanel) -> None:
+    client = PanelClient(panel.url, panel.API_KEY)
+    assert client.list_user_templates() == [{"id": 7, "name": "basic"}]
 
 
 def test_ensure_role_creates_once_and_never_modifies_existing(panel: FakePanel) -> None:
@@ -305,6 +351,15 @@ def test_client_template_is_uploaded_once_and_not_made_default_silently(
     assert panel.templates[0]["template_type"] == "xray_subscription"
     assert panel.templates[0]["is_default"] is False
     assert panel.templates[0]["content"] == '{"a": 1}'
+
+
+def test_upsert_client_template_creates_then_replaces_content(panel: FakePanel) -> None:
+    client = PanelClient(panel.url, FakePanel.API_KEY)
+    assert client.upsert_client_template("t", '{"a": 1}') == "created"
+    assert client.upsert_client_template("t", '{"a": 2}') == "updated"
+    assert len(panel.templates) == 1
+    assert panel.templates[0]["content"] == '{"a": 2}'
+    assert panel.templates[0]["id"] == 1
 
 
 def test_client_template_rejects_invalid_json_before_contacting_the_panel() -> None:

@@ -58,6 +58,8 @@ def test_core_config_has_clients_left_for_the_panel_and_no_local_stats_api(
     assert [i["tag"] for i in config["inbounds"]] == ["in-main", "in-80", "in-8080", "in-8880"]
     assert all(i["settings"]["clients"] == [] for i in config["inbounds"])
     assert "api" not in config
+    # Even if the node state has a local stats port for standalone use, panel cores omit it.
+    assert "api" not in core_config(state.with_stats_api(10085))
 
 
 def test_every_host_points_at_an_existing_inbound_tag(state: NodeState) -> None:

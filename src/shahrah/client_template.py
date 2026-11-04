@@ -26,7 +26,17 @@ from typing import Any
 from .xray_config import PRIVATE_NETWORKS
 
 DEFAULT_DOH = ("https://1.1.1.1/dns-query", "https://8.8.8.8/dns-query")
-_SNIFFING = {"enabled": True, "destOverride": ["http", "tls"], "routeOnly": False}
+# Common browser WebRTC STUN hosts. Blocking them in *proxy* mode reduces IP leaks;
+# TUN/VPN mode or a dedicated kill-switch client is still required for full coverage.
+WEBRTC_STUN_DOMAINS: tuple[str, ...] = (
+    "stun.l.google.com",
+    "stun1.l.google.com",
+    "stun2.l.google.com",
+    "stun3.l.google.com",
+    "stun4.l.google.com",
+    "stun.cloudflare.com",
+)
+_SNIFFING = {"enabled": True, "destOverride": ["http", "tls", "quic"], "routeOnly": False}
 
 
 def _local_inbound(tag: str, protocol: str, port: int) -> dict[str, Any]:
@@ -80,6 +90,17 @@ def xray_client_template(
                 # LAN stays local (printers, router UI); evaluated before the IPv6 block.
                 {"type": "field", "ip": list(PRIVATE_NETWORKS), "outboundTag": "DIRECT"},
                 {"type": "field", "ip": ["::/0"], "outboundTag": "BLOCK"},
+                {
+                    "type": "field",
+                    "domain": [f"full:{name}" for name in WEBRTC_STUN_DOMAINS],
+                    "outboundTag": "BLOCK",
+                },
+                # Multicast / broadcast must never leave the device via the tunnel.
+                {
+                    "type": "field",
+                    "ip": ["224.0.0.0/4", "255.255.255.255/32"],
+                    "outboundTag": "BLOCK",
+                },
             ],
         },
     }

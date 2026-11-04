@@ -356,3 +356,52 @@ def test_cdn_xhttp_listener_carries_a_real_tunnel(
         results = {r.endpoint: r for r in session.probe_all(timeout=10)}
     assert results["cdn-ok"].ok, results["cdn-ok"].detail
     assert not results["cdn-wrong-path"].ok  # the secret path is the only gate on plain HTTP
+
+
+@pytest.mark.e2e
+def test_cdn_tunnel_works_through_a_tcp_edge_proxy(
+    xray_bin: str, real_keypair: tuple[str, str], tmp_path: Path
+) -> None:
+    """Clients reach the origin only via an edge forwarder (CDN stand-in), not the origin port."""
+    from shahrah.edge_proxy import tcp_edge
+
+    if not _internet_available():
+        pytest.skip("needs internet access (the probe fetches through the tunnel)")
+    private, _ = real_keypair
+    user = User.create("shahrah-probe")
+    reality_port, origin_port = _free_port(), _free_port()
+    path = "/edge-secret-path-xyz"
+    server = ServerSettings(
+        profile=Profile.REALITY_VISION,
+        reality=RealityServer(target_host=E2E_TARGET, private_key=private, short_ids=("ab12",)),
+        listen="127.0.0.1",
+        port=reality_port,
+        allow_non_443=True,
+        extra_listeners=(
+            Listener(
+                origin_port,
+                Profile.CDN_XHTTP,
+                xhttp_path=path,
+                xhttp_mode="packet-up",
+                cdn_host="cdn.example.com",
+                edge_tls=False,
+            ),
+        ),
+    )
+    with (
+        run_server(xray_bin, server, [user], tmp_path),
+        tcp_edge("127.0.0.1", origin_port) as edge,
+    ):
+        endpoint = Endpoint(
+            "via-edge",
+            "127.0.0.1",
+            edge.listen_port,
+            Profile.CDN_XHTTP,
+            tls=False,
+            xhttp_path=path,
+            xhttp_mode="packet-up",
+        )
+        with XrayProbeSession(xray_bin, [endpoint], user) as session:
+            result = session.probe("via-edge", timeout=12)
+        assert result.ok, result.detail
+        assert edge.accepted >= 1

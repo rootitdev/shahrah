@@ -224,25 +224,82 @@ class XrayProbeSession:
             self._tmp.cleanup()
             self._tmp = None
 
-    def probe(self, endpoint_name: str, timeout: float = 8.0) -> ProbeResult:
-        """Fetch the target through one endpoint. Never raises for tunnel failures."""
+    @property
+    def endpoint_names(self) -> list[str]:
+        return list(self._ports)
+
+    @property
+    def alive(self) -> bool:
+        return self._proc is not None and self._proc.poll() is None
+
+    def probe(
+        self,
+        endpoint_name: str,
+        timeout: float = 8.0,
+        *,
+        target: ProbeTarget | None = None,
+    ) -> ProbeResult:
+        """Fetch the target through one endpoint. Never raises for tunnel failures.
+
+        ``target`` overrides the session default for this call (social/AI smoke checks).
+        """
         if self._proc is None:
             raise ProbeError("probe session is not running")
         if self._proc.poll() is not None:
             raise ProbeError("xray probe process has died; restart the session")
+        dest = target or self._target
         port = self._ports[endpoint_name]
         started = time.monotonic()
         try:
-            status = http_status_via_socks(port, self._target, timeout)
+            status = http_status_via_socks(port, dest, timeout)
         except (OSError, ConnectionError, ssl.SSLError, UnicodeError) as exc:
             return ProbeResult(endpoint_name, False, None, f"{type(exc).__name__}: {exc}"[:160])
         elapsed = (time.monotonic() - started) * 1000
-        if status in self._target.expect_status:
+        if status in dest.expect_status:
             return ProbeResult(endpoint_name, True, round(elapsed, 1))
         return ProbeResult(endpoint_name, False, None, f"unexpected HTTP status {status}")
 
-    def probe_all(self, timeout: float = 8.0) -> list[ProbeResult]:
+    def probe_all(
+        self, timeout: float = 8.0, *, target: ProbeTarget | None = None
+    ) -> list[ProbeResult]:
         """Probe every endpoint concurrently; one slow endpoint cannot delay the others."""
         with ThreadPoolExecutor(max_workers=len(self._endpoints)) as pool:
-            futures = [pool.submit(self.probe, ep.name, timeout) for ep in self._endpoints]
+            futures = [
+                pool.submit(self.probe, ep.name, timeout, target=target) for ep in self._endpoints
+            ]
             return [future.result() for future in futures]
+
+    def wave(
+        self,
+        endpoint_name: str,
+        count: int,
+        *,
+        timeout: float = 15.0,
+        target: ProbeTarget | None = None,
+        workers: int = 32,
+    ) -> dict[str, float | int | str]:
+        """Open ``count`` concurrent fetches through one endpoint (Iran-path load smoke)."""
+        if count < 1:
+            raise ValueError("count must be positive")
+        dest = target or self._target
+        with ThreadPoolExecutor(max_workers=min(workers, count)) as pool:
+            results = list(
+                pool.map(
+                    lambda _: self.probe(endpoint_name, timeout, target=dest),
+                    range(count),
+                )
+            )
+        latencies = sorted(r.latency_ms for r in results if r.ok and r.latency_ms is not None)
+        ok = sum(1 for r in results if r.ok)
+        p95 = (
+            latencies[max(0, int(len(latencies) * 0.95) - 1)]
+            if len(latencies) >= 20
+            else (latencies[-1] if latencies else 0.0)
+        )
+        return {
+            "endpoint": endpoint_name,
+            "requested": count,
+            "ok": ok,
+            "p50_ms": latencies[len(latencies) // 2] if latencies else 0.0,
+            "p95_ms": p95,
+        }

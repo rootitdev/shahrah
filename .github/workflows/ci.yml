@@ -20,4 +20,4 @@ jobs:
       - run: ruff format --check .
       # Xray-dependent tests skip themselves when no binary is available.
       - run: pytest
-      - run: bash -n deploy/install.sh
+      - run: bash -n deploy/install.sh deploy/attach-domain.sh deploy/on-burn.example.sh deploy/publish-control.example.sh deploy/settle-provider.example.sh

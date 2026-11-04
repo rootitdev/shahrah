@@ -10,12 +10,12 @@ ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRS = {".git", ".venv", ".pytest_cache", ".ruff_cache", "__pycache__", "_lt", "build"}
 TEXT_SUFFIXES = {".py", ".md", ".sh", ".toml", ".json", ".yml", ".yaml", ".txt", ".cfg", ".env"}
 
-# Documentation ranges, loopback, private/CGNAT/link-local space and two well-known public
-# resolvers used as defaults.
+# Documentation ranges, loopback, private/CGNAT/link-local, multicast/broadcast (routing
+# blocks in the client template), and two well-known public resolvers used as defaults.
 ALLOWED_IP = re.compile(
     r"^(127\.|0\.0\.0\.0$|10\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.|"
     r"172\.(1[6-9]|2\d|3[01])\.|192\.168\.|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.|"
-    r"1\.1\.1\.1$|8\.8\.8\.8$)"
+    r"22[4-9]\.|23\d\.|255\.255\.255\.255$|1\.1\.1\.1$|8\.8\.8\.8$)"
 )
 IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
 # A 43-char base64url token is the shape of an X25519 key; only the obvious dummy may appear.

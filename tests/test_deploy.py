@@ -48,3 +48,12 @@ def test_brain_unit_has_no_privileges_and_no_listening_sockets() -> None:
     assert "RestrictAddressFamilies=AF_INET AF_INET6" in unit
     assert "CAP_NET_BIND_SERVICE" not in unit
     assert "User=shahrah" in unit
+    assert "ReadWritePaths=/etc/shahrah" in unit
+
+
+def test_serve_sub_unit_keeps_path_secret_out_of_argv() -> None:
+    unit = deploy.serve_sub_unit()
+    assert "EnvironmentFile=/etc/shahrah/sub.env" in unit
+    assert "serve-sub --listen 127.0.0.1:8788" in unit
+    assert "--path-secret" not in unit  # secret must not appear on the process command line
+    assert "User=shahrah" in unit

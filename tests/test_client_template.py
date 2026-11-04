@@ -30,6 +30,10 @@ def test_ipv6_is_blocked_after_lan_ranges_are_kept_local() -> None:
     assert rules[0]["outboundTag"] == "DIRECT"
     assert "fe80::/10" in rules[0]["ip"]
     assert rules[1] == {"type": "field", "ip": ["::/0"], "outboundTag": "BLOCK"}
+    stun = next(r for r in rules if r.get("domain"))
+    assert stun["outboundTag"] == "BLOCK"
+    assert any("stun.l.google.com" in d for d in stun["domain"])
+    assert any(r.get("ip") == ["224.0.0.0/4", "255.255.255.255/32"] for r in rules)
 
 
 def test_local_proxies_listen_on_loopback_only() -> None:

@@ -1,0 +1,20 @@
+# Example public edge once you own real hostnames.
+# Replace every *.example.com — never commit real domains here.
+#
+#   caddy run --config /etc/caddy/Caddyfile
+#
+# Panel (PasarGuard) with public CA so ready-made clients accept HTTPS subs:
+panel.example.com {
+	reverse_proxy 127.0.0.1:8000
+}
+
+# Optional: expose loopback serve-sub behind TLS (path secret still required):
+sub.example.com {
+	reverse_proxy 127.0.0.1:8788
+}
+
+# Optional: TLS edge in front of a plain cdn-xhttp origin on the exit.
+# Origin must listen only on the private interface / firewall to the CDN IP range.
+edge.example.com {
+	reverse_proxy 127.0.0.1:8080
+}

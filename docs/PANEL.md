@@ -10,7 +10,7 @@ API, never imports its code, and stays independent of its licence and release cy
 | Person | Where | How |
 |---|---|---|
 | **Root admin** | Panel UI | PasarGuard's built-in *owner* role: everything. |
-| **Sales manager** | Panel UI | `sales_manager_role(...)`: creates and manages **only their own** customers, only from allow-listed plan templates, within caps on users, traffic and duration. No access to hosts, nodes, settings or other managers' customers. |
+| **Sales manager** | Panel UI | `sales_manager_role(...)` / `shahrah panel sales-role`: creates and manages **only their own** customers, only from allow-listed plan templates, within caps on users, traffic and duration. No access to hosts, nodes, settings or other managers' customers. Lab created `shahrah-sales-lab` on the Iran panel. |
 | **Customer** | Subscription page | Not a panel admin. Sees plan, usage and expiry on the page behind their subscription link and imports that link into any ready-made client. |
 | **Shahrah brain** | REST API key | `brain_role()`: may list/reorder/disable hosts and read nodes. Nothing else, so a leaked key cannot reach users or money. |
 
@@ -73,24 +73,58 @@ sudo systemctl start shahrah-brain
 user's uuid must also be a user on every exit it probes, which step 1 guarantees when the exits
 are panel nodes.
 
-## Not covered here
+## Live lab evidence
 
-Online payment collection and a Telegram sales bot are intentionally outside this layer:
-PasarGuard has no payments, and they can be added later on top of its REST API without
-touching the VPN core.
+On a 2 GB Iran VPS, PasarGuard (SQLite) runs next to the Shahrah brain. After
+`panel provision` / `bootstrap` and `remarks` in `brain.json`, the brain steers hosts
+(re-enable and disable). A self-signed cert can bind the panel on `0.0.0.0:8000` for lab
+access; set `SHAHRAH_PANEL_URL=https://127.0.0.1:8000` and
+`SHAHRAH_PANEL_INSECURE_TLS=1` so the brain trusts that cert **only on loopback**.
+Ready-made clients usually reject self-signed subscription URLs — use a real domain + LE
+cert (or `shahrah serve-sub` on the exit) for customer subs. Put the path secret in
+`/etc/shahrah/sub.env` as `SHAHRAH_SUB_SECRET=...` and install the unit with
+`shahrah print serve-sub-unit` so the secret never appears on the process argv. When
+listeners change on an independent exit, re-run `shahrah panel provision --update-core`
+(query flag `restart_nodes=false` by default).
+
+## Payments (`shahrah settle-hook`)
+
+PasarGuard has no built-in checkout. Shahrah ships a loopback HMAC webhook that credits a
+user's `expire` / `data_limit` through the panel API (stand-in for the older settle-web/pay
+stack, which is not vendored here):
+
+```bash
+export SHAHRAH_PANEL_URL=https://127.0.0.1:8000
+export SHAHRAH_PANEL_API_KEY=...
+export SHAHRAH_PANEL_INSECURE_TLS=1   # lab self-signed only
+export SHAHRAH_SETTLE_SECRET=$(shahrah settle-hook --print-secret)
+shahrah settle-hook --secret "$SHAHRAH_SETTLE_SECRET"
+# provider POSTs to http://127.0.0.1:8790/hooks/payment with header X-Shahrah-Signature
+```
+
+Put Nginx/Caddy + a real payment provider in front once the panel has a public CA certificate.
+A starting point is [`deploy/Caddyfile.example`](../deploy/Caddyfile.example).
+Provider adapters can emit a signed POST with
+`shahrah settle-hook --emit-curl USER --days N` (see
+[`deploy/settle-provider.example.sh`](../deploy/settle-provider.example.sh)).
+Body aliases: `days`, `traffic_gb`. Unlimited users (`expire`/`data_limit` = 0) are refused so a
+buggy payer cannot change product semantics. Lab: Iran settle-hook credited
+`shahrah_settle_lab` by +1 day via HMAC.
 
 ## Leak resistance for ready-made clients
 
 ```bash
-shahrah panel client-template            # uploads "shahrah-leak-resistant", not made default
-shahrah panel client-template --make-default   # explicit: applies to ALL users' JSON configs
+shahrah panel client-template                 # uploads "shahrah-leak-resistant", not default
+shahrah panel client-template --update        # refresh content if the name already exists
+shahrah panel client-template --make-default  # explicit: applies to ALL users' JSON configs
 ```
 
 The template (`shahrah.client_template`) is checked with a real Xray binary merged exactly the way the
 panel merges it. It tunnels DNS (DoH as plain `https://` URLs, no fallback to the local resolver),
-never resolves destinations on the device, blocks IPv6 in the client and keeps local proxy ports on
-loopback. The server side resolves names itself over DoH and has TCP keepalive plus idle/handshake
-limits so vanished mobile clients do not leave dead connections behind.
+never resolves destinations on the device, blocks IPv6, STUN/TURN hostnames used by WebRTC, and
+multicast/broadcast ranges, and keeps local proxy ports on loopback. The server side resolves names
+itself over DoH and has TCP keepalive plus idle/handshake limits so vanished mobile clients do not
+leave dead connections behind.
 
 What a template **cannot** do: a browser's WebRTC bypasses a SOCKS/HTTP proxy and can reveal the real
 address in *proxy mode*. Use the client's TUN/VPN mode or disable WebRTC in the browser. A dedicated

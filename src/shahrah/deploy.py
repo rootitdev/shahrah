@@ -58,6 +58,46 @@ WantedBy=multi-user.target
 """
 
 
+def serve_sub_unit(
+    *,
+    shahrah_bin: PurePosixPath = DEFAULT_SHAHRAH_BIN,
+    state: PurePosixPath = DEFAULT_CONFIG_DIR / "state.json",
+    env_file: PurePosixPath = DEFAULT_CONFIG_DIR / "sub.env",
+    listen: str = "127.0.0.1:8788",
+    user: str = SERVICE_USER,
+) -> str:
+    """Subscription HTTP server. Path secret lives in ``sub.env`` (never on ExecStart argv).
+
+    ``sub.env`` must contain ``SHAHRAH_SUB_SECRET=...`` (mode ``600``). Default listen is
+    loopback; expose via SSH tunnel or a TLS reverse proxy.
+    """
+    host, _, port_text = listen.partition(":")
+    host = host or "127.0.0.1"
+    port = port_text or "8788"
+    return f"""[Unit]
+Description=Shahrah subscription server (ready-made clients)
+After=network.target
+
+[Service]
+User={user}
+Group={user}
+EnvironmentFile={env_file}
+ExecStart={shahrah_bin} --state {state} serve-sub --listen {host}:{port}
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths={state.parent}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
 def brain_unit(
     *,
     shahrah_bin: PurePosixPath = DEFAULT_SHAHRAH_BIN,
@@ -69,8 +109,11 @@ def brain_unit(
     """The brain only makes outbound connections: no capabilities, no listening sockets.
 
     ``brain.json`` / ``brain.env`` must be readable by ``{user}`` (mode ``640``, group
-    ``{user}``). The installer sets that ownership; hand-written files often forget it.
+    ``{user}``) and their parent directory must be searchable (mode ``750``).
+    ``ProtectSystem=strict`` otherwise hides ``/etc``; ``ReadWritePaths`` keeps the
+    config directory reachable.
     """
+    conf_dir = config.parent
     return f"""[Unit]
 Description=Shahrah brain (tunnel health prober and panel steering)
 After=network-online.target
@@ -97,6 +140,7 @@ RestrictNamespaces=true
 RestrictAddressFamilies=AF_INET AF_INET6
 LockPersonality=true
 MemoryDenyWriteExecute=true
+ReadWritePaths={conf_dir}
 
 [Install]
 WantedBy=multi-user.target
@@ -128,9 +172,13 @@ def sysctl_conf() -> str:
     return """# Managed by shahrah
 net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
-net.core.somaxconn = 4096
-net.ipv4.tcp_max_syn_backlog = 8192
+net.core.somaxconn = 65535
+net.core.netdev_max_backlog = 16384
+net.ipv4.tcp_max_syn_backlog = 16384
 net.ipv4.ip_local_port_range = 10240 65535
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 15
 net.ipv4.tcp_fastopen = 3
+net.ipv4.tcp_slow_start_after_idle = 0
 fs.file-max = 2097152
 """

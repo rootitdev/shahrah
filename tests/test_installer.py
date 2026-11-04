@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "install.sh"
+ATTACH = Path(__file__).resolve().parent.parent / "deploy" / "attach-domain.sh"
 
 
 @pytest.fixture(scope="module")
@@ -55,15 +56,28 @@ def test_bash_accepts_the_syntax() -> None:
     bash = _find_bash()
     if bash is None:
         pytest.skip("bash not available")
-    try:
-        result = subprocess.run(
-            [bash, "-n", str(SCRIPT)], capture_output=True, check=False, timeout=20
+    for script in (SCRIPT, ATTACH):
+        try:
+            result = subprocess.run(
+                [bash, "-n", str(script)], capture_output=True, check=False, timeout=20
+            )
+        except OSError:
+            pytest.skip("bash is not usable here")
+        if b"\x00" in result.stdout + result.stderr:
+            pytest.skip("bash is only the WSL launcher stub (no distribution installed)")
+        assert result.returncode == 0, (
+            f"{script.name}: {result.stderr.decode(errors='replace')}"
         )
-    except OSError:
-        pytest.skip("bash is not usable here")
-    if b"\x00" in result.stdout + result.stderr:
-        pytest.skip("bash is only the WSL launcher stub (no distribution installed)")
-    assert result.returncode == 0, result.stderr.decode(errors="replace")
+
+
+def test_attach_domain_is_dry_run_by_default() -> None:
+    text = ATTACH.read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "\r" not in text
+    assert "--apply" in text
+    assert "cdn-xhttp" in text
+    assert "example.com" in text  # placeholders only
+    assert "set -euo pipefail" in text
 
 
 def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> None:

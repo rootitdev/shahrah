@@ -19,6 +19,7 @@ Safety rules, all enforced in :func:`plan_sync` and covered by tests:
 from __future__ import annotations
 
 import json
+import ssl
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
@@ -39,27 +40,47 @@ class PanelError(RuntimeError):
     """The panel rejected a request or could not be reached."""
 
 
+def _make_transport(*, insecure_tls: bool = False) -> Transport:
+    """Build a urllib transport. ``insecure_tls`` is for lab self-signed panel certs only."""
+
+    def transport(
+        method: str, url: str, headers: Mapping[str, str], body: bytes | None
+    ) -> tuple[int, Json]:
+        request = urllib.request.Request(url, data=body, method=method, headers=dict(headers))  # noqa: S310
+        handlers: list[urllib.request.BaseHandler] = []
+        if urlsplit(url).hostname in _LOOPBACK_HOSTS:
+            handlers.append(urllib.request.ProxyHandler({}))
+        if insecure_tls:
+            ctx = ssl._create_unverified_context()  # noqa: S323 - explicit lab opt-in
+            handlers.append(urllib.request.HTTPSHandler(context=ctx))
+        opener = urllib.request.build_opener(*handlers)
+        try:
+            with opener.open(request, timeout=15) as response:
+                raw = response.read()
+                return response.status, json.loads(raw) if raw else None
+        except urllib.error.HTTPError as exc:
+            raw = exc.read()
+            try:
+                return exc.code, json.loads(raw) if raw else None
+            except ValueError:
+                return exc.code, None
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            hint = ""
+            name = type(exc).__name__
+            if name == "RemoteDisconnected" and urlsplit(url).scheme == "http":
+                hint = (
+                    " (panel may require https:// — set SHAHRAH_PANEL_URL "
+                    "and SHAHRAH_PANEL_INSECURE_TLS=1 for lab)"
+                )
+            raise PanelError(f"panel unreachable: {name}{hint}") from exc
+
+    return transport
+
+
 def _default_transport(
     method: str, url: str, headers: Mapping[str, str], body: bytes | None
 ) -> tuple[int, Json]:
-    request = urllib.request.Request(url, data=body, method=method, headers=dict(headers))  # noqa: S310
-    # A panel on this machine must never be routed through a system/environment HTTP proxy.
-    if urlsplit(url).hostname in _LOOPBACK_HOSTS:
-        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-    else:
-        opener = urllib.request.build_opener()
-    try:
-        with opener.open(request, timeout=15) as response:
-            raw = response.read()
-            return response.status, json.loads(raw) if raw else None
-    except urllib.error.HTTPError as exc:
-        raw = exc.read()
-        try:
-            return exc.code, json.loads(raw) if raw else None
-        except ValueError:
-            return exc.code, None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise PanelError(f"panel unreachable: {type(exc).__name__}") from exc
+    return _make_transport(insecure_tls=False)(method, url, headers, body)
 
 
 def probe_user_payload(username: str, vless_uuid: str, group_ids: Sequence[int]) -> dict[str, Any]:
@@ -94,7 +115,8 @@ class PanelClient:
         api_key: str,
         *,
         allow_insecure_http: bool = False,
-        transport: Transport = _default_transport,
+        insecure_tls: bool = False,
+        transport: Transport | None = None,
     ) -> None:
         parts = urlsplit(base_url)
         if parts.scheme not in {"http", "https"} or not parts.hostname:
@@ -102,11 +124,13 @@ class PanelClient:
         local = parts.hostname in _LOOPBACK_HOSTS
         if parts.scheme == "http" and not (local or allow_insecure_http):
             raise ConfigError("refusing to send the API key over plain http (use https)")
+        if insecure_tls and not local:
+            raise ConfigError("insecure_tls is only allowed for loopback panel URLs")
         if not api_key.strip():
             raise ConfigError("panel api key must not be empty")
         self._base = base_url.rstrip("/")
         self._key = api_key.strip()
-        self._transport = transport
+        self._transport = transport or _make_transport(insecure_tls=insecure_tls)
 
     def __repr__(self) -> str:  # never leak the key through logs or tracebacks
         return f"PanelClient(base_url={self._base!r}, api_key=***)"
@@ -147,13 +171,25 @@ class PanelClient:
         self._request("POST", "/api/admin-role", dict(payload))
         return True
 
+    def list_user_templates(self) -> list[dict[str, Any]]:
+        """Return plan/user templates used to constrain sales roles."""
+        data = self._request("GET", "/api/user_templates")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+        if isinstance(data, dict):
+            items = data.get("templates") or data.get("user_templates") or data.get("items") or []
+            if isinstance(items, list):
+                return [item for item in items if isinstance(item, dict)]
+        raise PanelError("unexpected /api/user_templates response")
+
     def ensure_client_template(
         self, name: str, content: str, *, make_default: bool = False
     ) -> bool:
         """Upload an Xray subscription template unless one with that name exists.
 
         It is not made the default unless asked: the default applies to every user's config, so
-        switching it is an explicit decision. An existing template is never overwritten.
+        switching it is an explicit decision. An existing template is never overwritten; use
+        :meth:`upsert_client_template` when the operator deliberately wants a refresh.
         """
         data = self._request("GET", "/api/client_templates")
         templates = data.get("templates", []) if isinstance(data, dict) else []
@@ -165,6 +201,40 @@ class PanelClient:
             client_template_payload(name, content, make_default=make_default),
         )
         return True
+
+    def upsert_client_template(
+        self, name: str, content: str, *, make_default: bool = False
+    ) -> str:
+        """Create or replace a named Xray subscription template.
+
+        Returns ``\"created\"`` or ``\"updated\"``. Replacing content is intentional (leak rules
+        evolve); making it the panel default still requires ``make_default=True``.
+        """
+        data = self._request("GET", "/api/client_templates")
+        templates = data.get("templates", []) if isinstance(data, dict) else []
+        payload = client_template_payload(name, content, make_default=make_default)
+        for template in templates:
+            if template.get("name") != name:
+                continue
+            template_id = template.get("id")
+            if template_id is None:
+                raise PanelError(f"client template {name!r} has no id")
+            self._request("PUT", f"/api/client_template/{template_id}", payload)
+            return "updated"
+        self._request("POST", "/api/client_template", payload)
+        return "created"
+
+    def get_user(self, username: str) -> dict[str, Any]:
+        data = self._request("GET", f"/api/user/{username}")
+        if not isinstance(data, dict):
+            raise PanelError("unexpected user payload")
+        return data
+
+    def put_user(self, username: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        data = self._request("PUT", f"/api/user/{username}", dict(payload))
+        if not isinstance(data, dict):
+            raise PanelError("unexpected user update payload")
+        return data
 
     def ensure_probe_user(self, username: str, vless_uuid: str, group_ids: Sequence[int]) -> bool:
         """Create the unlimited account the prober connects with. Returns True if created.
@@ -186,18 +256,42 @@ class PanelClient:
         self._request("POST", "/api/user", probe_user_payload(username, vless_uuid, group_ids))
         return True
 
+    def list_cores(self) -> list[dict[str, Any]]:
+        data = self._request("GET", "/api/cores")
+        cores = data.get("cores", []) if isinstance(data, dict) else []
+        if not isinstance(cores, list):
+            raise PanelError("unexpected /api/cores response")
+        return cores
+
     def ensure_core(self, payload: Mapping[str, Any]) -> bool:
         """Create a core config unless one with that name exists. Returns True if created.
 
         An existing core is never modified: replacing a running core would restart Xray for
-        every connected user.
+        every connected user. Use :meth:`update_core` when the operator explicitly wants that.
         """
-        data = self._request("GET", "/api/cores")
-        cores = data.get("cores", []) if isinstance(data, dict) else []
-        if any(core.get("name") == payload["name"] for core in cores):
+        if any(core.get("name") == payload["name"] for core in self.list_cores()):
             return False
         self._request("POST", "/api/core", dict(payload))
         return True
+
+    def update_core(
+        self, payload: Mapping[str, Any], *, restart_nodes: bool = False
+    ) -> None:
+        """Replace an existing core's config by name (PasarGuard ``PUT /api/core/{id}``).
+
+        ``restart_nodes`` is a query flag on the panel API. Default false keeps
+        Shahrah-managed independent exits from being restarted by the panel.
+        """
+        name = payload.get("name")
+        match = next((core for core in self.list_cores() if core.get("name") == name), None)
+        if match is None or "id" not in match:
+            raise PanelError(f"no panel core named {name!r}")
+        flag = "true" if restart_nodes else "false"
+        self._request(
+            "PUT",
+            f"/api/core/{match['id']}?restart_nodes={flag}",
+            dict(payload),
+        )
 
     def ensure_host(self, payload: Mapping[str, Any]) -> bool:
         """Create a host unless one with that remark exists. Returns True if created."""

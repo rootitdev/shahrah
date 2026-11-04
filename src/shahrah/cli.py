@@ -15,12 +15,29 @@ import tempfile
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from . import client_template, deploy, keys, ops, provision, sni_scout, vantage
+from . import (
+    accounting,
+    capacity,
+    client_template,
+    deploy,
+    keys,
+    leakcheck,
+    loadtest,
+    ops,
+    provision,
+    readycheck,
+    settle,
+    sni_scout,
+    sni_watch,
+    subserve,
+    vantage,
+)
+from . import soak as soakmod
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
 from .panel import PanelClient, PanelError, sync
-from .prober import ProbeError, ProbeResult, XrayProbeSession
+from .prober import ProbeError, ProbeResult, ProbeTarget, XrayProbeSession
 from .roles import brain_role, sales_manager_role
 from .state import NodeState, load_state, save_state, write_private_file
 from .xray_config import dumps, render_server_config
@@ -91,18 +108,105 @@ def _build_parser() -> argparse.ArgumentParser:
     brain.add_argument("--once", action="store_true", help="run a single cycle and exit")
     brain.add_argument(
         "--control-report",
-        help="path or https URL of the control-vantage report; enables burn detection",
+        default=os.environ.get("SHAHRAH_CONTROL_REPORT", ""),
+        help="path or https URL of the control-vantage report (or SHAHRAH_CONTROL_REPORT)",
     )
     brain.add_argument("--control-max-age", type=float, default=300.0, help="seconds")
     brain.add_argument(
         "--on-burn",
         type=Path,
-        help="executable run (no shell) with the burned endpoint names as arguments",
+        default=Path(p) if (p := os.environ.get("SHAHRAH_ON_BURN", "")) else None,
+        help="executable run on burn (or SHAHRAH_ON_BURN); names only, no shell",
     )
     brain.add_argument(
-        "--write-report", type=Path, help="publish this vantage's results (control side)"
+        "--write-report",
+        type=Path,
+        default=Path(p) if (p := os.environ.get("SHAHRAH_WRITE_REPORT", "")) else None,
+        help="publish this vantage's results (or SHAHRAH_WRITE_REPORT)",
     )
     brain.add_argument("--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING"])
+
+    probe_cmd = sub.add_parser(
+        "probe",
+        help="fetch HTTPS destinations through brain.json tunnels (Iran-path smoke)",
+    )
+    probe_cmd.add_argument("--config", type=Path, required=True, help="brain JSON config")
+    probe_cmd.add_argument("--xray-bin", default=shutil.which("xray") or "xray")
+    probe_cmd.add_argument(
+        "--dest",
+        action="append",
+        default=[],
+        metavar="HOST[/PATH]",
+        help="repeatable; default: gstatic generate_204 + instagram + telegram",
+    )
+    probe_cmd.add_argument(
+        "--endpoint",
+        action="append",
+        default=[],
+        help="limit to these endpoint names (default: all in config)",
+    )
+    probe_cmd.add_argument(
+        "--wave",
+        type=int,
+        default=0,
+        help="also run N concurrent fetches through the first healthy endpoint",
+    )
+    probe_cmd.add_argument("--json", action="store_true")
+
+    soak_cmd = sub.add_parser(
+        "soak",
+        help="sustained fetches through one tunnel (social/AI soak evidence)",
+    )
+    soak_cmd.add_argument("--config", type=Path, required=True, help="brain JSON config")
+    soak_cmd.add_argument("--xray-bin", default=shutil.which("xray") or "xray")
+    soak_cmd.add_argument(
+        "--endpoint",
+        default="",
+        help="endpoint name (default: first 443, else first in config)",
+    )
+    soak_cmd.add_argument(
+        "--dest",
+        action="append",
+        default=[],
+        metavar="HOST[/PATH]",
+        help="repeatable; default social+AI set",
+    )
+    soak_cmd.add_argument("--workers", type=int, default=50)
+    soak_cmd.add_argument("--duration", type=float, default=300.0, help="seconds (min 30)")
+    soak_cmd.add_argument(
+        "--interval",
+        type=float,
+        default=2.0,
+        help="pause between fetches per worker",
+    )
+    soak_cmd.add_argument(
+        "--progress-file",
+        type=Path,
+        help="rewrite JSON progress here every ~30s (long soaks)",
+    )
+    soak_cmd.add_argument("--json", action="store_true")
+
+    leak = sub.add_parser(
+        "leakcheck",
+        help="static leak-resistance checks on the client template (not a phone TUN test)",
+    )
+    leak.add_argument(
+        "--file",
+        type=Path,
+        help="Xray client JSON to check (default: built-in leak-resistant template)",
+    )
+    leak.add_argument("--json", action="store_true")
+
+    ready = sub.add_parser(
+        "ready-check",
+        help="validate a ready-client subscription body (base64 or vless lines)",
+    )
+    ready.add_argument(
+        "--file",
+        type=Path,
+        help="subscription file (default: stdin)",
+    )
+    ready.add_argument("--json", action="store_true")
 
     panel = sub.add_parser("panel", help="one-time setup of a PasarGuard panel (owner key)")
     panel.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"))
@@ -116,6 +220,11 @@ def _build_parser() -> argparse.ArgumentParser:
     tmpl.add_argument(
         "--make-default", action="store_true", help="apply to ALL users (explicit choice)"
     )
+    tmpl.add_argument(
+        "--update",
+        action="store_true",
+        help="replace content if the name already exists (default: refuse overwrite)",
+    )
     prov = panel_sub.add_parser(
         "provision",
         help="create the core config and one host per listener from this node's state",
@@ -123,15 +232,38 @@ def _build_parser() -> argparse.ArgumentParser:
     prov.add_argument("--core-name", default="shahrah")
     prov.add_argument("--prefix", default="main", help="endpoint/host remark prefix")
     prov.add_argument("--dry-run", action="store_true", help="print the plan, change nothing")
+    prov.add_argument(
+        "--update-core",
+        action="store_true",
+        help="replace an existing core config when listeners change (does not restart nodes)",
+    )
+    prov.add_argument(
+        "--restart-nodes",
+        action="store_true",
+        help="with --update-core, ask the panel to restart its managed nodes",
+    )
     sales = panel_sub.add_parser("sales-role", help="create a least-privilege sales role")
     sales.add_argument("--name", required=True)
-    sales.add_argument("--template-id", type=int, nargs="+", required=True)
+    sales.add_argument(
+        "--template-id",
+        type=int,
+        nargs="+",
+        default=[],
+        help="plan template ids; omit with --auto-template to use the first panel template",
+    )
+    sales.add_argument(
+        "--auto-template",
+        action="store_true",
+        help="pick the first /api/user_templates id when --template-id is omitted",
+    )
     sales.add_argument("--max-users", type=int)
     sales.add_argument("--data-limit-max-bytes", type=int)
     sales.add_argument("--expire-max-seconds", type=int)
 
     show = sub.add_parser("print", help="print host files generated for the installer")
-    show.add_argument("what", choices=["systemd-unit", "brain-unit", "ufw", "sysctl"])
+    show.add_argument(
+        "what", choices=["systemd-unit", "brain-unit", "serve-sub-unit", "ufw", "sysctl"]
+    )
     show.add_argument("--ssh-port", type=int, default=22)
 
     rotate = sub.add_parser(
@@ -148,7 +280,16 @@ def _build_parser() -> argparse.ArgumentParser:
         "sni-scout",
         help="rank candidate TLS sites for use as a REALITY target (run on the exit)",
     )
-    scout.add_argument("hosts", nargs="+", help="domain names to probe")
+    scout.add_argument(
+        "hosts",
+        nargs="*",
+        help="domain names to probe (omit with --defaults)",
+    )
+    scout.add_argument(
+        "--defaults",
+        action="store_true",
+        help="probe the built-in REALITY candidate list",
+    )
     scout.add_argument("--timeout", type=float, default=5.0)
     scout.add_argument("--allow-risky", action="store_true")
     scout.add_argument("--json", action="store_true", help="machine-readable output")
@@ -159,7 +300,7 @@ def _build_parser() -> argparse.ArgumentParser:
     retarget.add_argument("target", help="TLS 1.3 domain the server will imitate")
 
     ops_cmd = sub.add_parser(
-        "ops", help="unified ops console (SNI scout today; watch/ig-mult placeholders)"
+        "ops", help="unified ops console (status, SNI scout/watch, usage, ig-mult)"
     )
     ops_cmd.add_argument("--listen", default="127.0.0.1:8787", help="host:port (default loopback)")
     ops_cmd.add_argument(
@@ -173,9 +314,150 @@ def _build_parser() -> argparse.ArgumentParser:
         help="optional JSON file with a brain describe() snapshot",
     )
     ops_cmd.add_argument(
+        "--access-log",
+        type=Path,
+        help="Xray access log path for live SNI watch / ig-mult shares in the ops UI",
+    )
+    ops_cmd.add_argument(
+        "--watchlist",
+        type=Path,
+        help="optional domain watchlist for SNI watch filtering",
+    )
+    ops_cmd.add_argument(
+        "--retention-hours",
+        type=float,
+        default=48.0,
+        help="SNI watch retention when serving /api/sni-watch (default 48)",
+    )
+    ops_cmd.add_argument(
+        "--stats-server",
+        default="",
+        help="loopback StatsService host:port for /api/usage (e.g. 127.0.0.1:10085)",
+    )
+    ops_cmd.add_argument("--xray-bin", default="xray", help="binary for statsquery")
+    ops_cmd.add_argument(
+        "--ig-mult-config",
+        type=Path,
+        default=None,
+        help="JSON path for Instagram billing multiplier (created on first save)",
+    )
+    ops_cmd.add_argument(
         "--print-token",
         action="store_true",
         help="generate a token, print it, and exit (for first-time setup)",
+    )
+
+    access = sub.add_parser(
+        "access-log",
+        help="enable/disable the Xray access log (required for SNI watch; off by default)",
+    )
+    access.add_argument(
+        "path",
+        nargs="?",
+        default="",
+        help="absolute log path, or omit with --off",
+    )
+    access.add_argument("--off", action="store_true", help="disable access logging again")
+
+    stats = sub.add_parser(
+        "stats-api",
+        help="enable/disable loopback StatsService (required for usage; off by default)",
+    )
+    stats.add_argument(
+        "port",
+        nargs="?",
+        type=int,
+        default=0,
+        help="loopback port (default 10085 when enabling)",
+    )
+    stats.add_argument("--off", action="store_true", help="disable the stats API again")
+
+    usage = sub.add_parser(
+        "usage",
+        help="print per-user traffic from the local Xray StatsService",
+    )
+    usage.add_argument("--xray-bin", default="xray")
+    usage.add_argument(
+        "--server",
+        default="",
+        help="host:port of StatsService (default 127.0.0.1:<stats_api_port>)",
+    )
+    usage.add_argument("--reset", action="store_true", help="reset counters after reading")
+    usage.add_argument("--json", action="store_true", help="machine-readable output")
+
+    watch = sub.add_parser("sni-watch", help="aggregate destinations from an Xray access log")
+    watch.add_argument("--log", type=Path, required=True, help="access log file")
+    watch.add_argument("--watchlist", type=Path, help="optional domain list to filter")
+    watch.add_argument("--retention-hours", type=float, default=48.0)
+
+    sub_cmd = sub.add_parser(
+        "serve-sub",
+        help="serve base64 subscriptions for ready-made clients (secret URL path)",
+    )
+    sub_cmd.add_argument("--listen", default="127.0.0.1:8788")
+    sub_cmd.add_argument(
+        "--path-secret",
+        default=os.environ.get("SHAHRAH_SUB_SECRET", ""),
+        help="unguessable path segment (or SHAHRAH_SUB_SECRET)",
+    )
+    sub_cmd.add_argument(
+        "--print-secret", action="store_true", help="generate a path secret and exit"
+    )
+
+    cap = sub.add_parser(
+        "capacity",
+        help="recommend Tuning / RAM for a target concurrent-user count",
+    )
+    cap.add_argument("--users", type=int, required=True, help="e.g. 1000, 2000, 3000")
+    cap.add_argument("--json", action="store_true")
+
+    settle_cmd = sub.add_parser(
+        "settle-hook",
+        help="HMAC payment webhook that credits PasarGuard users (loopback)",
+    )
+    settle_cmd.add_argument("--listen", default="127.0.0.1:8790")
+    settle_cmd.add_argument(
+        "--secret",
+        default=os.environ.get("SHAHRAH_SETTLE_SECRET", ""),
+        help="HMAC secret (or SHAHRAH_SETTLE_SECRET)",
+    )
+    settle_cmd.add_argument(
+        "--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL"), help="PasarGuard base URL"
+    )
+    settle_cmd.add_argument(
+        "--print-secret", action="store_true", help="generate an HMAC secret and exit"
+    )
+    settle_cmd.add_argument(
+        "--emit-curl",
+        metavar="USERNAME",
+        help="print a signed curl for a 1-day credit (provider integration smoke)",
+    )
+    settle_cmd.add_argument(
+        "--days", type=float, default=1.0, help="with --emit-curl: days to credit"
+    )
+
+    load_cmd = sub.add_parser(
+        "load-test",
+        help="concurrent REALITY tunnel load on loopback (capacity evidence)",
+    )
+    load_cmd.add_argument(
+        "--connections",
+        type=int,
+        default=300,
+        help=f"concurrent tunnels ({loadtest.MIN_CONNECTIONS}-{loadtest.MAX_CONNECTIONS})",
+    )
+    load_cmd.add_argument("--xray-bin", default=shutil.which("xray") or "xray")
+    load_cmd.add_argument(
+        "--target",
+        default=loadtest.DEFAULT_TARGET,
+        help="REALITY cover site (must be reachable on 443)",
+    )
+    load_cmd.add_argument("--idle-s", type=int, default=loadtest.DEFAULT_IDLE_S)
+    load_cmd.add_argument("--json", action="store_true")
+    load_cmd.add_argument(
+        "--skip-reap",
+        action="store_true",
+        help="do not wait for idle connection reaping (faster smoke)",
     )
     return parser
 
@@ -255,6 +537,157 @@ def _burn_hook(executable: Path) -> Callable[[Sequence[str]], None]:
     return hook
 
 
+def _panel_client(panel_url: str) -> PanelClient:
+    """Build a panel client; API key and TLS lab flags come from the environment only."""
+    insecure = os.environ.get("SHAHRAH_PANEL_INSECURE_TLS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    return PanelClient(
+        panel_url,
+        os.environ.get("SHAHRAH_PANEL_API_KEY", ""),
+        insecure_tls=insecure,
+    )
+
+
+def _probe_destinations(specs: Sequence[str]) -> list[ProbeTarget]:
+    """Parse ``host`` or ``host/path`` into ProbeTargets (TLS/443, accept common statuses)."""
+    if not specs:
+        # Social + AI fronts (product hostnames only — not deployment identifiers).
+        common = frozenset({200, 301, 302, 403})
+        return [
+            ProbeTarget(),
+            ProbeTarget("www.instagram.com", path="/", expect_status=frozenset({200, 301, 302})),
+            ProbeTarget(
+                "telegram.org", path="/", expect_status=frozenset({200, 301, 302, 404})
+            ),
+            ProbeTarget("chatgpt.com", path="/", expect_status=common),
+            ProbeTarget("claude.ai", path="/", expect_status=common),
+        ]
+    out: list[ProbeTarget] = []
+    for spec in specs:
+        host, _, path = spec.partition("/")
+        host = host.strip().lower().rstrip(".")
+        path = ("/" + path) if path else "/"
+        if not host or "/" in host or host.startswith("."):
+            raise ConfigError(f"bad --dest {spec!r}")
+        expect = frozenset({204}) if path == "/generate_204" else frozenset({200, 301, 302, 403})
+        out.append(ProbeTarget(host, path=path, expect_status=expect))
+    return out
+
+
+def _run_soak(args: argparse.Namespace) -> int:
+    config = BrainConfig.from_json(Path(args.config).read_text(encoding="utf-8"))
+    endpoints = list(config.endpoints)
+    if args.endpoint:
+        endpoints = [e for e in endpoints if e.name == args.endpoint]
+        if not endpoints:
+            raise ConfigError(f"unknown endpoint {args.endpoint!r}")
+    preferred = next((e for e in endpoints if e.port == 443), endpoints[0] if endpoints else None)
+    if preferred is None:
+        raise ConfigError("no endpoints to soak")
+    dests = _probe_destinations(args.dest) if args.dest else list(soakmod.DEFAULT_SOAK_TARGETS)
+    soak_cfg = soakmod.SoakConfig(
+        workers=args.workers,
+        duration_s=args.duration,
+        interval_s=args.interval,
+    )
+    xray_bin = args.xray_bin
+    if not Path(xray_bin).exists() and shutil.which(xray_bin):
+        xray_bin = shutil.which(xray_bin) or xray_bin
+    progress_cb = None
+    if args.progress_file is not None:
+
+        def progress_cb(payload: dict) -> None:
+            soakmod.write_progress_file(args.progress_file, payload)
+
+    with XrayProbeSession(xray_bin, [preferred], config.probe_user) as session:
+        report = soakmod.run_soak(
+            session,
+            preferred.name,
+            dests,
+            soak_cfg,
+            on_progress=progress_cb,
+        )
+    data = report.as_dict()
+    if args.json:
+        sys.stdout.write(json.dumps(data, indent=2) + "\n")
+    else:
+        sys.stdout.write(
+            f"soak {data['endpoint']} workers={data['workers']} "
+            f"{data['duration_s']}s  ok={data['ok']}/{data['attempts']} "
+            f"rate={data['success_rate']:.4f}  p50={data['p50_ms']}ms "
+            f"p95={data['p95_ms']}ms  xray_died={data['xray_died']}\n"
+        )
+        for host, counts in data["by_host"].items():
+            sys.stdout.write(f"  {host}: ok={counts['ok']} fail={counts['fail']}\n")
+    if report.xray_died or report.attempts == 0:
+        return 3
+    if report.ok / report.attempts < 0.95:
+        return 2
+    return 0
+
+
+def _run_probe(args: argparse.Namespace) -> int:
+    config = BrainConfig.from_json(Path(args.config).read_text(encoding="utf-8"))
+    endpoints = list(config.endpoints)
+    if args.endpoint:
+        wanted = set(args.endpoint)
+        endpoints = [e for e in endpoints if e.name in wanted]
+        missing = wanted - {e.name for e in endpoints}
+        if missing:
+            raise ConfigError(f"unknown endpoints: {sorted(missing)}")
+    if not endpoints:
+        raise ConfigError("no endpoints to probe")
+    dests = _probe_destinations(args.dest)
+    xray_bin = args.xray_bin
+    if not Path(xray_bin).exists() and shutil.which(xray_bin):
+        xray_bin = shutil.which(xray_bin) or xray_bin
+    payload: dict[str, object] = {"destinations": [], "wave": None}
+    with XrayProbeSession(xray_bin, endpoints, config.probe_user) as session:
+        for dest in dests:
+            rows = [
+                {
+                    "endpoint": r.endpoint,
+                    "ok": r.ok,
+                    "latency_ms": r.latency_ms,
+                    "detail": r.detail,
+                }
+                for r in session.probe_all(timeout=15.0, target=dest)
+            ]
+            payload["destinations"].append({"host": dest.host, "path": dest.path, "results": rows})
+        if args.wave > 0:
+            # Prefer 443, then first endpoint that just succeeded on the default target.
+            preferred = next((e.name for e in endpoints if e.port == 443), endpoints[0].name)
+            payload["wave"] = session.wave(preferred, args.wave, timeout=20.0)
+    if args.json:
+        sys.stdout.write(json.dumps(payload, indent=2) + "\n")
+    else:
+        for block in payload["destinations"]:  # type: ignore[assignment]
+            if not isinstance(block, dict):
+                continue
+            sys.stdout.write(f"# {block['host']}{block['path']}\n")
+            for row in block["results"]:  # type: ignore[index]
+                status = "ok" if row["ok"] else f"FAIL {row.get('detail') or ''}"
+                ms = row["latency_ms"]
+                sys.stdout.write(f"  {row['endpoint']}: {status}" + (f" {ms}ms\n" if ms else "\n"))
+        wave = payload["wave"]
+        if isinstance(wave, dict):
+            sys.stdout.write(
+                f"wave {wave['endpoint']}: {wave['ok']}/{wave['requested']}  "
+                f"p50={wave['p50_ms']}ms p95={wave['p95_ms']}ms\n"
+            )
+    # Fail if any destination/endpoint pair failed (except filtered TCP/53).
+    failed = [
+        (block["host"], row["endpoint"])
+        for block in payload["destinations"]  # type: ignore[union-attr]
+        for row in block["results"]
+        if not row["ok"] and not str(row["endpoint"]).endswith("-53")
+    ]
+    return 2 if failed else 0
+
+
 def _run_brain(args: argparse.Namespace) -> int:
     """Wire prober, oracle and panel together. The panel API key is read from the environment
     only: command-line arguments are visible to every local user through the process list."""
@@ -265,7 +698,7 @@ def _run_brain(args: argparse.Namespace) -> int:
 
     panel_sync: PanelSync | None = None
     if args.panel_url:
-        client = PanelClient(args.panel_url, os.environ.get("SHAHRAH_PANEL_API_KEY", ""))
+        client = _panel_client(args.panel_url)
         panel_sync = functools.partial(sync, client, path_to_remark=dict(config.remarks))
     else:
         logging.getLogger("shahrah.brain").warning("no --panel-url: observing only")
@@ -286,13 +719,14 @@ def _run_brain(args: argparse.Namespace) -> int:
             raise ProbeError(str(exc)) from exc
 
     on_burn = _burn_hook(args.on_burn) if args.on_burn else None
+    control_report = (args.control_report or "").strip()
     control_source = (
-        vantage.make_control_source(args.control_report, max_age_s=args.control_max_age)
-        if args.control_report
+        vantage.make_control_source(control_report, max_age_s=args.control_max_age)
+        if control_report
         else None
     )
     report_sink = None
-    if args.write_report:
+    if args.write_report is not None:
         report_path = args.write_report
 
         def report_sink(results: Sequence[ProbeResult]) -> None:
@@ -354,14 +788,20 @@ def _run_panel(args: argparse.Namespace) -> int:
         return 0
     if not args.panel_url:
         raise ConfigError("--panel-url (or SHAHRAH_PANEL_URL) is required")
-    client = PanelClient(args.panel_url, os.environ.get("SHAHRAH_PANEL_API_KEY", ""))
+    client = _panel_client(args.panel_url)
     try:
         if args.panel_command == "provision":
             state = load_state(args.state)
             plans = provision.host_plans(state, prefix=args.prefix)
-            core_created = client.ensure_core(provision.core_payload(args.core_name, state))
+            payload = provision.core_payload(args.core_name, state)
+            core_created = client.ensure_core(payload)
+            core_state = "created" if core_created else "exists"
+            if not core_created and args.update_core:
+                client.update_core(payload, restart_nodes=args.restart_nodes)
+                core_state = "updated"
             hosts = {plan.remark: client.ensure_host(plan.payload) for plan in plans}
             result = _provision_summary(args, plans, core_created, hosts)
+            result["core"]["state"] = core_state
         elif args.panel_command == "bootstrap":
             probe_uuid = args.probe_uuid or keys.generate_uuid()
             user = User(probe_uuid, args.probe_username)  # validates both values
@@ -373,24 +813,41 @@ def _run_panel(args: argparse.Namespace) -> int:
                 "probe_user_state": "created" if user_created else "already existed",
             }
         elif args.panel_command == "client-template":
-            created = client.ensure_client_template(
-                args.name,
-                client_template.dumps(client_template.xray_client_template()),
-                make_default=args.make_default,
-            )
+            body = client_template.dumps(client_template.xray_client_template())
+            if args.update:
+                state = client.upsert_client_template(
+                    args.name, body, make_default=args.make_default
+                )
+            else:
+                created = client.ensure_client_template(
+                    args.name, body, make_default=args.make_default
+                )
+                state = "created" if created else "already existed"
             result = {
-                "client_template": "created" if created else "already existed",
-                "is_default": bool(created and args.make_default),
+                "client_template": state,
+                "is_default": bool(args.make_default and state in {"created", "updated"}),
             }
         else:
+            template_ids = list(args.template_id)
+            if not template_ids:
+                if not args.auto_template:
+                    raise ConfigError("pass --template-id or --auto-template")
+                templates = client.list_user_templates()
+                template_ids = [int(t["id"]) for t in templates if t.get("id") is not None]
+                if not template_ids:
+                    raise ConfigError("panel has no user templates to bind the sales role to")
+                template_ids = template_ids[:1]
             role = sales_manager_role(
                 args.name,
-                allowed_template_ids=args.template_id,
+                allowed_template_ids=template_ids,
                 max_users=args.max_users,
                 data_limit_max_bytes=args.data_limit_max_bytes,
                 expire_max_seconds=args.expire_max_seconds,
             )
-            result = {"sales_role": "created" if client.ensure_role(role) else "already existed"}
+            result = {
+                "sales_role": "created" if client.ensure_role(role) else "already existed",
+                "template_ids": template_ids,
+            }
     except PanelError as exc:
         raise ConfigError(str(exc)) from exc
     sys.stdout.write(json.dumps(result, indent=2) + "\n")
@@ -421,16 +878,61 @@ def _run(args: argparse.Namespace) -> int:
             out.write(deploy.systemd_unit())
         elif args.what == "brain-unit":
             out.write(deploy.brain_unit())
+        elif args.what == "serve-sub-unit":
+            out.write(deploy.serve_sub_unit())
         elif args.what == "sysctl":
             out.write(deploy.sysctl_conf())
-        else:
+        elif args.what == "ufw":
             ports = [item.port for item in load_state(state_path).server_settings().listeners()]
             out.write("\n".join(deploy.ufw_commands(ssh_port=args.ssh_port, public_ports=ports)))
             out.write("\n")
+        else:
+            raise ConfigError(f"unknown print target: {args.what}")
         return 0
 
     if args.command == "brain":
         return _run_brain(args)
+    if args.command == "leakcheck":
+        if args.file is not None:
+            payload = json.loads(args.file.read_text(encoding="utf-8"))
+        else:
+            payload = client_template.xray_client_template()
+        report = leakcheck.check_client_template(payload)
+        data = report.as_dict()
+        if args.json:
+            out.write(json.dumps(data, indent=2) + "\n")
+        else:
+            mark = "PASS" if report.ok else "FAIL"
+            out.write(f"leakcheck {mark}\n")
+            for item in report.checks:
+                flag = "ok" if item["ok"] else "NO"
+                detail = f"  {item['detail']}" if item["detail"] else ""
+                out.write(f"  {flag} {item['name']}{detail}\n")
+        return 0 if report.ok else 2
+    if args.command == "ready-check":
+        body = (
+            args.file.read_text(encoding="utf-8")
+            if args.file is not None
+            else sys.stdin.read()
+        )
+        report = readycheck.check_subscription(body)
+        data = report.as_dict()
+        if args.json:
+            out.write(json.dumps(data, indent=2) + "\n")
+        else:
+            mark = "PASS" if report.ok else "FAIL"
+            out.write(f"ready-check {mark} links={report.link_count}\n")
+            for item in report.links:
+                flag = "ok" if item.ok else "NO"
+                detail = f"  {item.detail}" if item.detail else ""
+                out.write(f"  {flag} {item.name} ({item.profile}){detail}\n")
+            for note in report.notes:
+                out.write(f"note: {note}\n")
+        return 0 if report.ok else 2
+    if args.command == "probe":
+        return _run_probe(args)
+    if args.command == "soak":
+        return _run_soak(args)
     if args.command == "panel":
         return _run_panel(args)
     if args.command == "ops":
@@ -445,13 +947,124 @@ def _run(args: argparse.Namespace) -> int:
             host=host or "127.0.0.1",
             port=int(port_text or "8787"),
             brain_status_path=str(args.brain_status) if args.brain_status else None,
+            access_log_path=str(args.access_log) if args.access_log else None,
+            watchlist_path=str(args.watchlist) if args.watchlist else None,
+            retention_hours=args.retention_hours,
+            stats_server=args.stats_server or None,
+            xray_bin=args.xray_bin,
+            ig_mult_path=str(args.ig_mult_config) if args.ig_mult_config else None,
         )
         out.write(f"ops listening on http://{config.host}:{config.port}/ (token required)\n")
         ops.serve(config)
         return 0
 
+    if args.command == "sni-watch":
+        store = sni_watch.WatchStore(retention_s=args.retention_hours * 3600)
+        store.ingest_file(args.log)
+        watchlist = sni_watch.load_watchlist(args.watchlist) if args.watchlist else None
+        out.write(json.dumps(store.summary(watchlist=watchlist), indent=2) + "\n")
+        return 0
+
+    if args.command == "serve-sub" and args.print_secret:
+        out.write(subserve.generate_path_secret() + "\n")
+        return 0
+
+    if args.command == "settle-hook" and args.print_secret:
+        out.write(secrets.token_urlsafe(32) + "\n")
+        return 0
+
+    if args.command == "capacity":
+        plan = capacity.plan_for_users(args.users)
+        if args.json:
+            out.write(json.dumps(plan.as_dict(), indent=2) + "\n")
+        else:
+            t = plan.tuning
+            out.write(
+                f"users={plan.users}  buffer={t.buffer_size_kb}KiB  "
+                f"idle={t.conn_idle_s}s  keepalive={t.tcp_keepalive_idle_s}/"
+                f"{t.tcp_keepalive_interval_s}s\n"
+                f"xray_rss~{plan.xray_rss_mb}MiB  recommend_vps_ram>={plan.vps_ram_mb}MiB\n"
+            )
+            for note in plan.notes:
+                out.write(f"- {note}\n")
+        return 0
+
+    if args.command == "load-test":
+        xray_bin = args.xray_bin
+        if not Path(xray_bin).exists() and shutil.which(xray_bin):
+            xray_bin = shutil.which(xray_bin) or xray_bin
+        if not Path(xray_bin).exists():
+            raise ConfigError(f"xray binary not found: {args.xray_bin}")
+        private, public = keys.generate_keypair()
+        with tempfile.TemporaryDirectory(prefix="shahrah-load-") as tmp:
+            report = loadtest.run_load(
+                xray_bin,
+                Path(tmp),
+                connections=args.connections,
+                target=args.target,
+                idle_s=args.idle_s,
+                public_key=public,
+                private_key=private,
+                require_reap=not args.skip_reap,
+            )
+        if args.json:
+            out.write(json.dumps(report.as_dict(), indent=2) + "\n")
+        else:
+            d = report.as_dict()
+            out.write(
+                f"ok={d['ok']}/{d['connections']}  rate={d['success_rate']:.4f}  "
+                f"p50={d['p50_ms']}ms  p95={d['p95_ms']}ms  "
+                f"peak={d['echo_peak']}  reaped={d['idle_reaped']}  "
+                f"took={d['duration_s']}s\n"
+            )
+            if d["errors_sample"]:
+                out.write("errors: " + "; ".join(d["errors_sample"]) + "\n")
+        # Non-zero when the harness itself could not meet a basic capacity bar.
+        if report.ok < args.connections * 0.95:
+            return 2
+        if not args.skip_reap and not report.idle_reaped:
+            return 3
+        return 0
+
+    if args.command == "settle-hook":
+        if not args.secret:
+            raise ConfigError("pass --secret or set SHAHRAH_SETTLE_SECRET")
+        if args.emit_curl:
+            req = settle.signed_request(
+                args.secret,
+                {"username": args.emit_curl, "days": args.days, "payment_id": "demo"},
+                base_url=f"http://{args.listen}",
+            )
+            out.write(
+                f"curl -sS -X POST {req['url']!r} \\\n"
+                f"  -H 'Content-Type: application/json' \\\n"
+                f"  -H '{req['header']}: {req['signature']}' \\\n"
+                f"  -d {req['body']!r}\n"
+            )
+            return 0
+        if not args.panel_url:
+            raise ConfigError("--panel-url (or SHAHRAH_PANEL_URL) is required")
+        host, _, port_text = args.listen.partition(":")
+        port = int(port_text or "8790")
+        client = _panel_client(args.panel_url)
+
+        def credit(username: str, add_expire_s: int, add_bytes: int) -> None:
+            settle.credit_user(
+                client,
+                settle.SettleEvent(username, add_expire_s, add_bytes),
+            )
+
+        out.write(f"settle webhook on http://{host or '127.0.0.1'}:{port}/hooks/payment\n")
+        settle.serve(args.secret, credit, host=host or "127.0.0.1", port=port)
+        return 0
+
     if args.command == "sni-scout":
-        results = sni_scout.scout(args.hosts, timeout_s=args.timeout, allow_risky=args.allow_risky)
+        results = sni_scout.scout(
+            args.hosts,
+            timeout_s=args.timeout,
+            allow_risky=args.allow_risky,
+            use_defaults=args.defaults,
+        )
         if args.json:
             out.write(
                 json.dumps(
@@ -463,6 +1076,7 @@ def _run(args: argparse.Namespace) -> int:
                             "tls_version": r.tls_version,
                             "alpn": r.alpn,
                             "detail": r.detail,
+                            "architectures": list(r.architectures),
                         }
                         for r in results
                     ],
@@ -474,9 +1088,11 @@ def _run(args: argparse.Namespace) -> int:
             for result in results:
                 mark = "ok " if result.ok else "NO "
                 latency = f"{result.latency_ms:.0f}ms" if result.latency_ms is not None else "-"
+                arch = ",".join(result.architectures) or "-"
                 out.write(
                     f"{mark} {result.host:40} {latency:>8}  "
-                    f"{result.tls_version or '-':8}  {result.alpn or '-':8}  {result.detail}\n"
+                    f"{result.tls_version or '-':8}  {result.alpn or '-':8}  "
+                    f"{arch:8}  {result.detail}\n"
                 )
             ranking = sni_scout.ranking(results)
             out.write(f"ranking: {' '.join(ranking) if ranking else '(none)'}\n")
@@ -505,6 +1121,65 @@ def _run(args: argparse.Namespace) -> int:
             "next: shahrah apply && systemctl restart shahrah-xray "
             "and update brain.json / client links (sni=)\n"
         )
+        return 0
+
+    if args.command == "access-log":
+        if args.off:
+            state = state.with_access_log(None)
+        else:
+            if not args.path:
+                raise ConfigError("pass a path or --off")
+            state = state.with_access_log(args.path)
+        save_state(state_path, state)
+        out.write(
+            f"access_log -> {state.access_log or 'disabled'}\n"
+            "next: shahrah apply && systemctl restart shahrah-xray\n"
+        )
+        return 0
+
+    if args.command == "stats-api":
+        if args.off:
+            state = state.with_stats_api(None)
+        else:
+            port = args.port or 10085
+            state = state.with_stats_api(port)
+        save_state(state_path, state)
+        out.write(
+            f"stats_api_port -> {state.stats_api_port or 'disabled'}\n"
+            "next: shahrah apply && systemctl restart shahrah-xray\n"
+        )
+        return 0
+
+    if args.command == "usage":
+        server = args.server
+        if not server:
+            if state.stats_api_port is None:
+                raise ConfigError(
+                    "stats API is disabled; run `shahrah stats-api` then apply + restart"
+                )
+            server = f"127.0.0.1:{state.stats_api_port}"
+        traffic = accounting.query_stats(xray_bin=args.xray_bin, server=server, reset=args.reset)
+        if args.json:
+            out.write(
+                json.dumps({label: row.as_dict() for label, row in traffic.items()}, indent=2)
+                + "\n"
+            )
+        else:
+            out.write(accounting.format_table(traffic))
+        return 0
+
+    if args.command == "serve-sub":
+        if not args.path_secret:
+            raise ConfigError("pass --path-secret or set SHAHRAH_SUB_SECRET")
+        host, _, port_text = args.listen.partition(":")
+        port = int(port_text or "8788")
+        # Prefer env so `ps` does not show the path secret on the command line.
+        secret = os.environ.get("SHAHRAH_SUB_SECRET", "").strip() or args.path_secret
+        labels = [u.label for u in state.users]
+        for label in labels:
+            out.write(subserve.subscription_url(host or "127.0.0.1", port, secret, label) + "\n")
+        out.write("(serving; Ctrl-C to stop)\n")
+        subserve.serve(state_path, secret, host=host or "127.0.0.1", port=port)
         return 0
 
     if args.command == "apply":

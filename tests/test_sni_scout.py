@@ -15,6 +15,18 @@ def test_rejects_ips_and_risky_apple_targets() -> None:
         scout(["203.0.113.10"])
     with pytest.raises(ConfigError, match="risky"):
         scout(["www.apple.com"])
+    with pytest.raises(ConfigError, match="at least one host"):
+        scout([])
+
+
+def test_defaults_skip_risky_and_tag_architecture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "shahrah.sni_scout._handshake",
+        lambda host, port, timeout_s: ScoutResult(host, True, 10.0, "TLSv1.3", "h2", "ok"),
+    )
+    results = scout(use_defaults=True)
+    assert results
+    assert all(r.ok and "reality" in r.architectures for r in results)
 
 
 def test_ranking_keeps_only_successes_in_latency_order() -> None:

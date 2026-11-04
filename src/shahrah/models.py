@@ -217,6 +217,9 @@ class ServerSettings:
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False  # permit ports outside CRISIS_PORTS (443/80/53)
     stats_api_port: int | None = None  # loopback-only gRPC stats API for usage accounting
+    # Opt-in: when set, Xray writes an access log (needed by SNI watch). Default is off so a
+    # seized server does not contain a browsing history.
+    access_log: str | None = None
     tuning: Tuning = field(default_factory=Tuning)
     extra_listeners: tuple[Listener, ...] = ()
 
@@ -225,6 +228,10 @@ class ServerSettings:
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
         if self.profile is Profile.CDN_XHTTP:
             raise ConfigError("the primary listener must be a REALITY profile")
+        if self.access_log is not None and (
+            not self.access_log.startswith("/") or any(ch.isspace() for ch in self.access_log)
+        ):
+            raise ConfigError("access_log must be an absolute path without whitespace")
         listeners = self.listeners()
         ports = [listener.port for listener in listeners]
         if len(set(ports)) != len(ports):

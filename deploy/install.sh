@@ -180,6 +180,8 @@ init_node() {
   if [[ -z "$(shahrah --state "$state" user list)" ]]; then
     shahrah --state "$state" user add first >/dev/null
   fi
+  # Loopback StatsService for `shahrah usage` on independent nodes (not panel cores).
+  shahrah --state "$state" stats-api 10085 >/dev/null
   shahrah --state "$state" apply --xray-bin /usr/local/bin/xray \
     --config-out "$CONF_DIR/xray.json" --group "$SERVICE_USER"
 }
@@ -220,7 +222,17 @@ install_brain() {
   log "installing the brain service"
   [[ -f "$CONF_DIR/brain.env" ]] || install -m 0640 -o root -g "$SERVICE_USER" /dev/null "$CONF_DIR/brain.env"
   if [[ ! -s "$CONF_DIR/brain.env" ]]; then
-    printf "# Panel owner access is NOT needed here: use the least-privilege brain key.\nSHAHRAH_PANEL_URL=\nSHAHRAH_PANEL_API_KEY=\n" > "$CONF_DIR/brain.env"
+    cat > "$CONF_DIR/brain.env" <<'EOF'
+# Panel owner access is NOT needed here: use the least-privilege brain key.
+# Lab self-signed panels: use https://127.0.0.1:8000 and INSECURE_TLS=1 (plain http fails TLS panels).
+SHAHRAH_PANEL_URL=https://127.0.0.1:8000
+SHAHRAH_PANEL_API_KEY=
+SHAHRAH_PANEL_INSECURE_TLS=1
+# Optional burn / control vantage (paths or https URLs):
+# SHAHRAH_CONTROL_REPORT=/var/lib/shahrah/control-report.json
+# SHAHRAH_WRITE_REPORT=/var/www/html/shahrah-report.json
+# SHAHRAH_ON_BURN=/usr/local/sbin/shahrah-on-burn
+EOF
   fi
   # The service runs as $SERVICE_USER; root-only 0600 files cause PermissionError at start.
   chown root:"$SERVICE_USER" "$CONF_DIR" "$CONF_DIR/brain.env"
@@ -280,9 +292,18 @@ main() {
 
   log "done. Client link for user 'first' (keep it private):"
   shahrah --state "$CONF_DIR/state.json" link first
-  printf '\nAdd users:  shahrah user add NAME && shahrah apply --xray-bin /usr/local/bin/xray \\\n'
-  printf '            --config-out %s/xray.json --group %s && systemctl restart %s\n' \
-    "$CONF_DIR" "$SERVICE_USER" "$SERVICE_NAME"
+  cat <<EOF
+
+Next steps (see docs/OPERATOR.md):
+  shahrah user add NAME && shahrah apply --xray-bin /usr/local/bin/xray \\
+    --config-out ${CONF_DIR}/xray.json --group ${SERVICE_USER} && systemctl restart ${SERVICE_NAME}
+  # loopback subscription (secret in EnvironmentFile, never on argv):
+  umask 077
+  printf 'SHAHRAH_SUB_SECRET=%s\n' "\$(shahrah serve-sub --print-secret)" > ${CONF_DIR}/sub.env
+  shahrah print serve-sub-unit > /etc/systemd/system/shahrah-serve-sub.service
+  systemctl enable --now shahrah-serve-sub
+  # size the box: shahrah capacity --users 2000 && shahrah load-test --connections 500
+EOF
 }
 
 main "$@"

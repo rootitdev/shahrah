@@ -119,8 +119,9 @@ def render_server_config(
         for index, listener in enumerate(server.listeners())
     ]
     rules: list[dict[str, Any]] = []
+    access = server.access_log if server.access_log else "none"
     config: dict[str, Any] = {
-        "log": {"loglevel": log_level, "access": "none"},
+        "log": {"loglevel": log_level, "access": access},
         "inbounds": inbounds,
         "outbounds": [
             {

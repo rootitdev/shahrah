@@ -5,9 +5,18 @@ Goal: stable access to social media, messengers and AI services for thousands of
 heavily filtered networks, with servers that are hard to find and easy to install.
 
 > **Status: early development.** Control-plane core, real tunnel prober, node installer,
-> PasarGuard integration and the brain loop exist and are unit/loopback tested. **Nothing has
-> been run on real servers yet** (installer, real-network behaviour, 1000+ user load). See
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PANEL.md](docs/PANEL.md).
+> PasarGuard integration and the brain loop are unit/loopback tested. A functional Iran→foreign
+> tunnel (REALITY+XHTTP on 443/80) and local StatsService usage counters have been verified on
+> lab VPS boxes; live PasarGuard (self-signed HTTPS) + brain host-steering (incl. disabling
+> filtered TCP/53), capacity/sysctl guidance, leak-resistant client template, and an HMAC
+> `settle-hook` stand-in, Instagram multiplier in ops, exit loopback load at 2000 tunnels,
+> and Iran-path concurrent HTTPS waves at **3000** have been verified on lab VPS boxes.
+> Lab also verified a **30 min** Iran-path social/AI soak at **99.95%** and `shahrah leakcheck`.
+> **Still unproven:** public-CA panel/subs, a real payment provider in front of settle-hook,
+> real CDN edge, multi-hour soak at production-scale heavy sessions, dedicated client.
+> See [docs/EVIDENCE.md](docs/EVIDENCE.md), [docs/OPERATOR.md](docs/OPERATOR.md),
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PANEL.md](docs/PANEL.md) and
+> [docs/CAPACITY.md](docs/CAPACITY.md).
 
 ## Install a node
 
@@ -42,7 +51,13 @@ shahrah sub alice         # base64 subscription body
 | Module | Purpose |
 |---|---|
 | `shahrah.models` | Validated models for servers, users and client endpoints. Refuses unsafe defaults (non-443 ports, IP REALITY targets, Apple/iCloud targets). |
-| `shahrah.xray_config` | Renders an Xray server config: VLESS + REALITY with XTLS-Vision (raw) or XHTTP, no access log, private-range and BitTorrent blocking, loopback-only stats API. |
+| `shahrah.xray_config` | Renders an Xray server config: VLESS + REALITY with XTLS-Vision (raw) or XHTTP, no access log by default, private-range and BitTorrent blocking, optional loopback-only stats API. |
+| `shahrah.accounting` | Per-user uplink/downlink from Xray StatsService (`shahrah usage`); install enables port 10085 on independent nodes. |
+| `shahrah.capacity` | Sizing hints for 1k–3k concurrent users (`shahrah capacity --users N`). |
+| `shahrah.settle` | HMAC payment webhook that credits PasarGuard expiry/traffic (`shahrah settle-hook`). |
+| `shahrah.ig_mult` | Instagram CDN billing weight inside `shahrah ops` (hit-share proxy, no browse archive). |
+| `shahrah.ops` | Unified ops console: status, SNI scout/watch, usage, ig-mult (PasarGuard stays external). |
+| `shahrah probe` | Iran-path smoke: HTTPS through brain tunnels (Instagram/Telegram/…) plus optional `--wave`. |
 | `shahrah.links` | Builds `vless://` links and base64 subscription bodies that ready-made clients import. |
 | `shahrah.oracle` | Pure path-health decision engine: fail/recover streaks, minimum dwell time, outage and allowlist-style (`restricted`) detection. |
 | `shahrah.prober`, `shahrah.xray_client` | Real tunnel prober: one Xray client process, a SOCKS port per endpoint, an actual HTTPS request through each tunnel (not just a TLS check of the edge). Its output feeds the oracle. |

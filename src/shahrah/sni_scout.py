@@ -27,6 +27,18 @@ from .models import RISKY_TARGET_SUFFIXES, ConfigError, is_ip, validate_host
 
 DEFAULT_TIMEOUT_S = 5.0
 
+# Safe-ish public sites often usable as REALITY dest/SNI. Scout from the *exit*
+# (foreign VPS), not from Iran. Never treat these as CDN edge hostnames.
+DEFAULT_REALITY_CANDIDATES: tuple[str, ...] = (
+    "www.cloudflare.com",
+    "www.microsoft.com",
+    "www.samsung.com",
+    "dl.google.com",
+    "www.logitech.com",
+    "www.asus.com",
+    "www.sony.com",
+)
+
 
 @dataclass(frozen=True, slots=True)
 class ScoutResult:
@@ -36,6 +48,20 @@ class ScoutResult:
     tls_version: str | None
     alpn: str | None
     detail: str = ""
+    architectures: tuple[str, ...] = ()
+
+    def with_arch(self) -> ScoutResult:
+        """Tag survivors as REALITY-capable; CDN edges use operator-owned names, not these."""
+        arch: tuple[str, ...] = ("reality",) if self.ok else ()
+        return ScoutResult(
+            self.host,
+            self.ok,
+            self.latency_ms,
+            self.tls_version,
+            self.alpn,
+            self.detail,
+            arch,
+        )
 
 
 def _handshake(host: str, port: int, timeout_s: float) -> ScoutResult:
@@ -80,17 +106,30 @@ def _handshake(host: str, port: int, timeout_s: float) -> ScoutResult:
 
 
 def scout(
-    hosts: Sequence[str],
+    hosts: Sequence[str] | None = None,
     *,
     port: int = 443,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     allow_risky: bool = False,
+    use_defaults: bool = False,
 ) -> list[ScoutResult]:
-    """Probe ``hosts`` and return every result (failures included), best-first among successes."""
-    if not hosts:
-        raise ConfigError("at least one host is required")
+    """Probe ``hosts`` and return every result (failures included), best-first among successes.
+
+    When ``hosts`` is empty and ``use_defaults`` is true, probe ``DEFAULT_REALITY_CANDIDATES``
+    (skipping risky suffixes unless ``allow_risky``). Run this on the exit node that will dial
+    the REALITY target so latency reflects the production path.
+    """
+    incoming = list(hosts or [])
+    if not incoming and use_defaults:
+        incoming = [
+            h
+            for h in DEFAULT_REALITY_CANDIDATES
+            if allow_risky or not h.endswith(RISKY_TARGET_SUFFIXES)
+        ]
+    if not incoming:
+        raise ConfigError("at least one host is required (or pass use_defaults=True)")
     cleaned: list[str] = []
-    for host in hosts:
+    for host in incoming:
         validate_host(host, "sni scout host")
         if is_ip(host):
             raise ConfigError(f"REALITY target must be a domain name, not an IP: {host!r}")
@@ -100,7 +139,7 @@ def scout(
             )
         cleaned.append(host)
 
-    results = [_handshake(host, port, timeout_s) for host in cleaned]
+    results = [_handshake(host, port, timeout_s).with_arch() for host in cleaned]
     ok = sorted(
         (r for r in results if r.ok), key=lambda r: (r.latency_ms is None, r.latency_ms, r.host)
     )

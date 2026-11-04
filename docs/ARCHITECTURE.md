@@ -48,13 +48,40 @@ healthy for several cycles (enable the crisis tier). Leaving a failed path is im
 back to a better one needs consecutive successes **and** a minimum dwell time, so flaky paths
 do not flap.
 
+## Usage accounting (independent nodes)
+
+`shahrah stats-api 10085` (installer does this) opens Xray's StatsService on loopback only.
+`shahrah usage` reads per-user uplink/downlink via `xray api statsquery`. Panel-managed cores
+omit the local stats API; PasarGuard accounts traffic itself.
+
+## Crisis port 53
+
+`--multi-port` / `listener add 53:reality-xhttp` installs the third crisis listener. On the
+measured Iran→foreign lab path, TCP/53 stays filtered: the brain marks `exit-53` unhealthy
+and disables the matching panel host while keeping 443/80. The listener remains for networks
+where 53 still crosses the border.
+
+## Unified ops (not a PasarGuard fork)
+
+`shahrah ops` is the operator shell: SNI scout/watch, usage, and Instagram billing multiplier
+(`ig_mult`) live here. PasarGuard remains the system of record for users and money.
+See [OPS.md](OPS.md). CDN-fronted XHTTP operator steps: [CDN.md](CDN.md).
+
+## Iran-path smoke (`shahrah probe`)
+
+From a vantage inside the filtered network, `shahrah probe --config brain.json` fetches
+real HTTPS destinations (default: gstatic `generate_204`, Instagram, Telegram) through
+each tunnel and can run a concurrent `--wave N` on the preferred port. Lab evidence:
+exit-443/80 both delivered Instagram and Telegram; a 40-connection wave on 443 succeeded.
+
 ## Not built yet
 
-1. Prober: real tunnel checks (not just edge TLS) feeding `oracle.step`.
-2. One-command installer for Debian/Ubuntu (Xray install, key generation, firewall, systemd).
-3. Management layer: root admin, sales managers and customers on top of PasarGuard.
-4. CDN-fronted XHTTP profile (needs a TLS-terminating reverse proxy).
-5. Leak-proof dedicated clients (kill-switch, DNS/IPv6/WebRTC leak protection).
+1. Public CA HTTPS for PasarGuard (domain + Let's Encrypt) so customer subscription links
+   work in ready-made clients; a real payment provider in front of `settle-hook`.
+2. Real CDN edge attached to `cdn-xhttp` (profile + guide exist; edge not wired in lab).
+3. Leak-proof dedicated clients (kill-switch, DNS/IPv6/WebRTC leak protection) — after ready-made clients are stable.
+4. Multi-hour soak with 1000–3000 *heavy* social/AI sessions (lab: 3000 short waves +
+   30 min soak at 99.95%; 2 h soak in flight; still short of production-scale heavy sessions).
 
 ## Burn detection and rotation
 

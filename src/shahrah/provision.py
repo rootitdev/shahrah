@@ -33,7 +33,7 @@ def core_config(state: NodeState) -> dict[str, Any]:
 
     The panel node runs its own stats/API plumbing, so the loopback stats API is not included.
     """
-    return render_server_config(state.server_settings(), users=())
+    return render_server_config(state.server_settings(stats_api_port=None), users=())
 
 
 def core_payload(name: str, state: NodeState) -> dict[str, Any]:

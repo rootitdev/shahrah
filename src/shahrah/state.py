@@ -12,7 +12,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from . import keys
 from .models import (
@@ -30,6 +30,7 @@ from .models import (
 )
 
 STATE_VERSION = 1
+_STATS_UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,6 +48,8 @@ class NodeState:
     xhttp_path: str = "/"
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False
+    access_log: str | None = None
+    stats_api_port: int | None = None  # loopback StatsService; None = disabled
     users: tuple[User, ...] = field(default_factory=tuple)
     extra_listeners: tuple[Listener, ...] = ()
 
@@ -87,7 +90,12 @@ class NodeState:
             extra_listeners=extra_listeners,
         )
 
-    def server_settings(self, *, stats_api_port: int | None = None) -> ServerSettings:
+    def server_settings(self, *, stats_api_port: object = _STATS_UNSET) -> ServerSettings:
+        resolved = (
+            self.stats_api_port
+            if stats_api_port is _STATS_UNSET
+            else cast("int | None", stats_api_port)
+        )
         return ServerSettings(
             profile=self.profile,
             reality=RealityServer(
@@ -100,9 +108,18 @@ class NodeState:
             xhttp_path=self.xhttp_path,
             xhttp_mode=self.xhttp_mode,
             allow_non_443=self.allow_non_443,
-            stats_api_port=stats_api_port,
+            stats_api_port=resolved,
+            access_log=self.access_log,
             extra_listeners=self.extra_listeners,
         )
+
+    def with_access_log(self, path: str | None) -> NodeState:
+        """Enable or disable the Xray access log (required for SNI watch)."""
+        return replace(self, access_log=path)
+
+    def with_stats_api(self, port: int | None) -> NodeState:
+        """Enable or disable the loopback StatsService used for usage accounting."""
+        return replace(self, stats_api_port=port)
 
     def endpoints(self, prefix: str = "main") -> list[Endpoint]:
         """One client endpoint per listener, named ``<prefix>-<port>``.
@@ -214,6 +231,8 @@ class NodeState:
             "short_ids": list(self.short_ids),
             "port": self.port,
             "allow_non_443": self.allow_non_443,
+            "access_log": self.access_log,
+            "stats_api_port": self.stats_api_port,
             "xhttp_path": self.xhttp_path,
             "xhttp_mode": self.xhttp_mode,
             "users": [{"uuid": user.uuid, "label": user.label} for user in self.users],
@@ -247,6 +266,8 @@ class NodeState:
                 short_ids=tuple(data["short_ids"]),
                 port=data["port"],
                 allow_non_443=data["allow_non_443"],
+                access_log=data.get("access_log"),
+                stats_api_port=data.get("stats_api_port"),
                 xhttp_path=data["xhttp_path"],
                 xhttp_mode=data["xhttp_mode"],
                 users=tuple(User(u["uuid"], u["label"]) for u in data["users"]),
