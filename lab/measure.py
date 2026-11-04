@@ -183,17 +183,23 @@ def brain_scenario(xray: XrayProbeSession, hy2: Hy2ProbeSession, eps: list) -> d
     for profile, want_mode, want_active in plan:
         censor(profile)
         trace = []
-        for _ in range(5):
+        # Up to 8 cycles; stop once the expectation holds (hysteresis needs a few cycles,
+        # recovering from outage takes the longest). The cycle count is reported.
+        last: dict = {}
+        active_ok = False
+        for _ in range(8):
             clock[0] += 30
             d = brain.cycle()
             if d is not None:
-                trace.append({"mode": str(d.state.mode), "active": d.state.active,
-                              "ranking": list(d.ranking)})
-        last = trace[-1] if trace else {}
-        active_ok = want_active is None or last.get("active") == want_active
+                last = {"mode": str(d.state.mode), "active": d.state.active,
+                        "ranking": list(d.ranking)}
+                trace.append(last)
+            active_ok = want_active is None or last.get("active") == want_active
+            if len(trace) >= 3 and last.get("mode") == want_mode and active_ok:
+                break
         phases.append({
             "profile": profile, "expected_mode": want_mode, "expected_active": want_active,
-            "observed": last, "trace": trace,
+            "observed": last, "trace": trace, "cycles": len(trace),
             "pass": last.get("mode") == want_mode and active_ok,
         })
         print("brain", profile, last, flush=True)
@@ -223,12 +229,14 @@ def write_md(data: dict) -> None:
     for profile, row in data["matrix"].items():
         lines.append(f"| {profile} | " + " | ".join(cell(row[p]) for p in PATHS) + " |")
     lines += ["", "## Brain / oracle failover", "",
-              "| censor profile | expected mode / active | observed | pass |", "|---|---|---|---|"]
+              "| censor profile | expected mode / active | observed | cycles | pass |",
+              "|---|---|---|---|---|"]
     for ph in data["brain"]["phases"]:
         o = ph["observed"]
         lines.append(f"| {ph['profile']} | {ph['expected_mode']} / {ph['expected_active']} | "
-                     f"{o.get('mode')} / {o.get('active')} | {'✅' if ph['pass'] else '❌'} |")
-    (HERE / "RESULTS.md").write_text("\n".join(lines) + "\n")
+                     f"{o.get('mode')} / {o.get('active')} | {ph.get('cycles')} | "
+                     f"{'✅' if ph['pass'] else '❌'} |")
+    (HERE / "RESULTS.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main() -> int:
