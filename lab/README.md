@@ -33,10 +33,14 @@ on teardown; nothing secret is written into the repo.
 
 ## Censor profiles (`lab/censor.sh`)
 
-| profile | what the censor does (only on traffic leaving the client) |
+By default the censor sits on the client leg. `--leg intl` applies the same profile on the iran→exit
+leg (`inet` namespace). The matrix rows written `intl:<profile>` use that leg.
+
+| profile | what the censor does |
 |---|---|
 | open | nothing |
-| sni-dpi | nfqueue DPI (`dpi.py`, stdlib): RST on non-allowlisted SNI and on SNI/IP mismatch (allowlisted name sent to an IP it does not resolve to) |
+| sni-dpi | nfqueue DPI (`dpi.py`, stdlib): RST on non-allowlisted SNI and on SNI/IP mismatch (allowlisted name sent to an IP it does not resolve to). It also decrypts QUIC v1 Initials, reassembles the CRYPTO frames and drops the flow on the same rules |
+| sni-dpi-strict | sni-dpi, plus it drops any UDP flow whose first packet is not a parseable QUIC Initial (this catches obfuscated QUIC such as salamander) |
 | udp-block | drop all UDP except DNS |
 | udp-throttle | hashlimit UDP above 60 pps (burst 30) |
 | allowlist-ip | only the iran relay and the cover IP are reachable |
@@ -57,8 +61,9 @@ It cannot show:
   per-ASN or time-of-day policy. "Works here" is necessary, not sufficient.
 - **Real-world timing.** Everything runs on one host; absolute numbers are loopback-scale.
   Only `lossy-mobile` adds realistic delay, and netem loss is uniform, not bursty like 4G.
-- **Iran↔exit censorship.** The censor sits only on the client leg; the iran→exit leg is clean.
-- **CDN / domain-fronting paths.** Not modelled (open).
+- **A real CDN.** `cdn` (198.18.6.2, `cdn.lab`) is a TLS-terminating forwarder in front of the
+  exit's XHTTP listener. It is allowlisted like a domestic CDN edge would be. It shows the
+  mechanism, not Cloudflare/ArvanCloud behaviour, rate limits or edge blocking.
 - **Throughput and fairness at scale**, many users, or carrier NAT behaviour.
 - WSL quirks: DNS lookups from WSL to the outside are slow (~8 s), so the lab pins every name
   in per-namespace hosts files and its own resolver; WSL2 NAT is not involved in-lab.
@@ -69,20 +74,25 @@ A real deployment needs an SNI that resolves to (or is plausible for) the relay'
 
 ## Findings worth knowing (see RESULTS.md for numbers)
 
-- REALITY with a borrowed SNI dies under an SNI/IP-mismatch DPI, on any port. Only a cover
-  whose name really resolves to the exit (or a relay) survives it.
-- `relay-ww` (client → iran relay, SNI `cover.lab`) trips the same mismatch rule. It is the
-  only path left under `allowlist-ip`, so the relay SNI must be plausible for the relay's IP.
-- Hysteria2 passes `sni-dpi` only because this DPI does not parse QUIC Initials; real Iranian
-  middleboxes do block QUIC by SNI. Treat that cell as optimistic.
-- paqet has a ~120 ms TTFB floor even on a clean link (KCP pacing). It is a rescue path, not a
-  daily driver. It survives every UDP and SNI profile and dies under allowlist/shutdown.
-- With strict conntrack (`nf_conntrack_tcp_loose=0`), paqet's handshake-less TCP is not
-  "ESTABLISHED" and dies under icmp-only. A loose stateful firewall would let it through.
-- In `outage` the brain keeps the last active path (ranking is empty) instead of clearing it;
-  that avoids flapping and is how it is meant to behave.
-- `reality-xhttp` shows as passing `sni-dpi`. Its pooled HTTP/2 connection, opened under the
-  previous profile, outlived the switch, and this DPI only judges new handshakes. That says
-  long-lived XHTTP connections ride out a policy change. It does **not** say a fresh XHTTP
-  handshake passes; a fresh one with a borrowed SNI is reset like Vision. Open: re-run
-  with a new client session per profile.
+Each profile row now starts fresh client sessions, so a connection opened under an earlier profile
+cannot carry over.
+
+- REALITY with a borrowed SNI (Vision, XHTTP and domain) dies under sni-dpi on every leg. The
+  earlier "XHTTP passes sni-dpi" result was a pooled connection carried over from the previous
+  profile. A fresh XHTTP handshake is reset like Vision.
+- `cdn-xhttp` (fronted through an allowlisted edge) is the only path that survives every DPI and
+  allowlist row on both legs: sni-dpi, sni-dpi-strict, intl:sni-dpi and intl:allowlist-ip. It
+  costs about 70–90 ms TTFB in the lab and is the slowest path for media under loss (17–23 s versus
+  about 1–3 s). The brain moves to it under intl:allowlist-ip.
+- With QUIC parsing, plain Hysteria2 (real SNI in the Initial) is blocked by sni-dpi. Salamander
+  Hysteria2 still passes sni-dpi but dies under sni-dpi-strict, as any obfuscated UDP does.
+- `relay-ww` survives intl:sni-dpi, because its intl leg carries an allowlisted plausible name.
+  It is the only path under client-leg allowlist-ip and dies under intl:allowlist-ip.
+- paqet has a TTFB floor of about 120 ms (KCP pacing). It survives sni-dpi-strict and every UDP
+  profile, and dies under the allowlist rows, icmp-only and shutdown.
+- In the udp-throttle row, salamander Hysteria2 failed while plain Hysteria2 passed at about
+  200 ms TTFB. This happened in one run. Re-check it before drawing a conclusion.
+- In `outage` the brain keeps the last active path (ranking is empty) instead of clearing it. This
+  avoids flapping and is the intended behaviour.
+- Cover traffic to TEST-NET/reserved IPs is blocked by Xray freedom and, now, also by Shahrah's
+  Hysteria2 ACL (same list). The lab adds explicit allow rules only for its cover IP.

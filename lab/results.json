@@ -1,60 +1,78 @@
 {
-  "generated": "2026-11-04 14:42 +0330",
+  "generated": "2026-11-04 15:46 +0330",
   "matrix": {
     "open": {
       "reality-vision": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 10.7,
-        "p50_ms": 10.7,
-        "p95_ms": 22.0,
+        "ttfb_p50_ms": 9.9,
+        "p50_ms": 9.9,
+        "p95_ms": 22.5,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.01
       },
       "reality-xhttp": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.9,
-        "p50_ms": 9.1,
-        "p95_ms": 32.0,
+        "ttfb_p50_ms": 9.2,
+        "p50_ms": 9.3,
+        "p95_ms": 30.2,
         "media_ok": true,
         "media_s": 0.03
       },
       "reality-domain": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 9.3,
-        "p50_ms": 9.5,
-        "p95_ms": 13.2,
+        "ttfb_p50_ms": 8.7,
+        "p50_ms": 8.9,
+        "p95_ms": 11.4,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.01
       },
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 14.7,
-        "p50_ms": 14.8,
-        "p95_ms": 39.1,
+        "ttfb_p50_ms": 9.6,
+        "p50_ms": 9.7,
+        "p95_ms": 1038.8,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.01
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 79.4,
+        "p50_ms": 79.7,
+        "p95_ms": 130.8,
+        "media_ok": true,
+        "media_s": 0.11
       },
       "hysteria2": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.4,
-        "p50_ms": 8.5,
-        "p95_ms": 16.4,
+        "ttfb_p50_ms": 6.7,
+        "p50_ms": 7.0,
+        "p95_ms": 9.2,
+        "media_ok": true,
+        "media_s": 0.34
+      },
+      "hysteria2-plain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.3,
+        "p50_ms": 8.7,
+        "p95_ms": 10.1,
         "media_ok": true,
         "media_s": 0.34
       },
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 121.0,
-        "p50_ms": 121.9,
-        "p95_ms": 122.8,
+        "ttfb_p50_ms": 121.5,
+        "p50_ms": 122.1,
+        "p95_ms": 123.4,
         "media_ok": true,
-        "media_s": 0.15
+        "media_s": 0.17
       }
     },
     "sni-dpi": {
@@ -64,13 +82,9 @@
         "detail": "first 3 requests failed"
       },
       "reality-xhttp": {
-        "ok": true,
-        "success": 1.0,
-        "ttfb_p50_ms": 6.8,
-        "p50_ms": 7.0,
-        "p95_ms": 9.6,
-        "media_ok": true,
-        "media_s": 0.03
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
       },
       "reality-domain": {
         "ok": false,
@@ -82,63 +96,91 @@
         "success": 0.0,
         "detail": "first 3 requests failed"
       },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 76.6,
+        "p50_ms": 76.9,
+        "p95_ms": 96.1,
+        "media_ok": true,
+        "media_s": 0.15
+      },
       "hysteria2": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.3,
-        "p50_ms": 9.0,
-        "p95_ms": 12.8,
+        "ttfb_p50_ms": 7.2,
+        "p50_ms": 7.5,
+        "p95_ms": 9.3,
         "media_ok": true,
         "media_s": 0.34
+      },
+      "hysteria2-plain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
       },
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 120.8,
-        "p50_ms": 121.6,
-        "p95_ms": 123.4,
+        "ttfb_p50_ms": 121.2,
+        "p50_ms": 121.9,
+        "p95_ms": 122.6,
         "media_ok": true,
-        "media_s": 0.22
+        "media_s": 0.19
       }
     },
     "udp-block": {
       "reality-vision": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.5,
-        "p50_ms": 8.7,
-        "p95_ms": 11.9,
+        "ttfb_p50_ms": 10.3,
+        "p50_ms": 10.5,
+        "p95_ms": 30.1,
         "media_ok": true,
         "media_s": 0.01
       },
       "reality-xhttp": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 7.8,
-        "p50_ms": 8.1,
-        "p95_ms": 9.5,
+        "ttfb_p50_ms": 7.7,
+        "p50_ms": 8.2,
+        "p95_ms": 32.3,
         "media_ok": true,
         "media_s": 0.03
       },
       "reality-domain": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 9.9,
-        "p50_ms": 10.3,
-        "p95_ms": 12.5,
+        "ttfb_p50_ms": 8.4,
+        "p50_ms": 8.6,
+        "p95_ms": 10.6,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.01
       },
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 13.7,
-        "p50_ms": 14.3,
-        "p95_ms": 1012.6,
+        "ttfb_p50_ms": 10.9,
+        "p50_ms": 11.2,
+        "p95_ms": 1036.7,
         "media_ok": true,
         "media_s": 0.01
       },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 77.0,
+        "p50_ms": 77.3,
+        "p95_ms": 126.5,
+        "media_ok": true,
+        "media_s": 0.16
+      },
       "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
         "ok": false,
         "success": 0.0,
         "detail": "first 3 requests failed"
@@ -146,61 +188,83 @@
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 121.6,
-        "p50_ms": 122.2,
-        "p95_ms": 123.2,
+        "ttfb_p50_ms": 121.1,
+        "p50_ms": 121.7,
+        "p95_ms": 123.1,
         "media_ok": true,
-        "media_s": 0.17
+        "media_s": 0.18
       }
     },
     "udp-throttle": {
       "reality-vision": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 7.8,
-        "p50_ms": 8.0,
-        "p95_ms": 10.3,
+        "ttfb_p50_ms": 9.6,
+        "p50_ms": 10.2,
+        "p95_ms": 29.0,
         "media_ok": true,
         "media_s": 0.01
       },
       "reality-xhttp": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 7.3,
+        "ttfb_p50_ms": 7.1,
         "p50_ms": 7.9,
-        "p95_ms": 9.6,
+        "p95_ms": 29.1,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.03
       },
       "reality-domain": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.7,
-        "p50_ms": 8.9,
-        "p95_ms": 11.9,
+        "ttfb_p50_ms": 7.8,
+        "p50_ms": 7.9,
+        "p95_ms": 10.4,
         "media_ok": true,
         "media_s": 0.01
       },
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 12.5,
-        "p50_ms": 12.9,
-        "p95_ms": 14.8,
+        "ttfb_p50_ms": 12.3,
+        "p50_ms": 12.4,
+        "p95_ms": 27.8,
         "media_ok": true,
         "media_s": 0.01
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 79.4,
+        "p50_ms": 79.5,
+        "p95_ms": 104.8,
+        "media_ok": true,
+        "media_s": 0.11
       },
       "hysteria2": {
         "ok": false,
         "success": 0.0,
-        "detail": "first 3 requests failed"
+        "ttfb_p50_ms": null,
+        "p50_ms": null,
+        "p95_ms": null,
+        "media_ok": false,
+        "media_s": null
+      },
+      "hysteria2-plain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 201.8,
+        "p50_ms": 204.5,
+        "p95_ms": 260.5,
+        "media_ok": true,
+        "media_s": 6.62
       },
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 120.8,
-        "p50_ms": 121.4,
-        "p95_ms": 122.8,
+        "ttfb_p50_ms": 121.2,
+        "p50_ms": 121.7,
+        "p95_ms": 123.3,
         "media_ok": true,
         "media_s": 0.17
       }
@@ -224,13 +288,23 @@
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 10.1,
-        "p50_ms": 10.2,
-        "p95_ms": 1053.0,
+        "ttfb_p50_ms": 10.7,
+        "p50_ms": 10.9,
+        "p95_ms": 1028.8,
         "media_ok": true,
         "media_s": 0.01
       },
+      "cdn-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
       "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
         "ok": false,
         "success": 0.0,
         "detail": "first 3 requests failed"
@@ -262,7 +336,17 @@
         "success": 0.0,
         "detail": "first 3 requests failed"
       },
+      "cdn-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
       "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
         "ok": false,
         "success": 0.0,
         "detail": "first 3 requests failed"
@@ -277,20 +361,20 @@
       "reality-vision": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.7,
-        "p50_ms": 8.8,
-        "p95_ms": 11.0,
+        "ttfb_p50_ms": 11.4,
+        "p50_ms": 11.9,
+        "p95_ms": 43.6,
         "media_ok": true,
-        "media_s": 0.02
+        "media_s": 0.01
       },
       "reality-xhttp": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 8.4,
-        "p50_ms": 8.8,
-        "p95_ms": 12.3,
+        "ttfb_p50_ms": 7.2,
+        "p50_ms": 7.6,
+        "p95_ms": 25.9,
         "media_ok": true,
-        "media_s": 0.04
+        "media_s": 0.03
       },
       "reality-domain": {
         "ok": false,
@@ -300,85 +384,121 @@
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 11.8,
-        "p50_ms": 12.4,
-        "p95_ms": 38.9,
+        "ttfb_p50_ms": 11.2,
+        "p50_ms": 12.0,
+        "p95_ms": 14.4,
         "media_ok": true,
         "media_s": 0.02
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 68.8,
+        "p50_ms": 68.9,
+        "p95_ms": 138.8,
+        "media_ok": true,
+        "media_s": 0.15
       },
       "hysteria2": {
         "ok": true,
         "success": 1.0,
+        "ttfb_p50_ms": 6.3,
+        "p50_ms": 6.5,
+        "p95_ms": 9.2,
+        "media_ok": true,
+        "media_s": 0.34
+      },
+      "hysteria2-plain": {
+        "ok": true,
+        "success": 1.0,
         "ttfb_p50_ms": 6.9,
-        "p50_ms": 7.2,
-        "p95_ms": 10.4,
+        "p50_ms": 7.1,
+        "p95_ms": 11.8,
         "media_ok": true,
         "media_s": 0.34
       },
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 120.7,
-        "p50_ms": 121.6,
-        "p95_ms": 122.6,
+        "ttfb_p50_ms": 121.1,
+        "p50_ms": 122.0,
+        "p95_ms": 123.0,
         "media_ok": true,
-        "media_s": 0.18
+        "media_s": 0.17
       }
     },
     "lossy-mobile": {
       "reality-vision": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 633.2,
-        "p50_ms": 655.8,
-        "p95_ms": 1610.0,
+        "ttfb_p50_ms": 642.8,
+        "p50_ms": 643.0,
+        "p95_ms": 1633.3,
         "media_ok": true,
-        "media_s": 2.19
+        "media_s": 3.09
       },
       "reality-xhttp": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 452.1,
-        "p50_ms": 452.2,
-        "p95_ms": 643.1,
+        "ttfb_p50_ms": 336.1,
+        "p50_ms": 336.4,
+        "p95_ms": 496.5,
         "media_ok": true,
-        "media_s": 0.92
+        "media_s": 1.89
       },
       "reality-domain": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 877.7,
-        "p50_ms": 878.0,
-        "p95_ms": 2630.1,
+        "ttfb_p50_ms": 718.5,
+        "p50_ms": 718.6,
+        "p95_ms": 3807.3,
         "media_ok": true,
-        "media_s": 2.26
+        "media_s": 3.29
       },
       "relay-ww": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 642.2,
-        "p50_ms": 642.3,
-        "p95_ms": 1652.0,
+        "ttfb_p50_ms": 636.5,
+        "p50_ms": 636.6,
+        "p95_ms": 1814.7,
         "media_ok": true,
-        "media_s": 2.25
+        "media_s": 2.23
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 590.6,
+        "p50_ms": 590.8,
+        "p95_ms": 1142.0,
+        "media_ok": true,
+        "media_s": 17.07
       },
       "hysteria2": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 331.8,
-        "p50_ms": 334.3,
-        "p95_ms": 627.4,
+        "ttfb_p50_ms": 324.2,
+        "p50_ms": 328.7,
+        "p95_ms": 467.9,
         "media_ok": true,
         "media_s": 1.44
+      },
+      "hysteria2-plain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 330.6,
+        "p50_ms": 330.7,
+        "p95_ms": 598.3,
+        "media_ok": true,
+        "media_s": 1.15
       },
       "paqet": {
         "ok": true,
         "success": 1.0,
-        "ttfb_p50_ms": 395.2,
-        "p50_ms": 395.5,
-        "p95_ms": 580.7,
+        "ttfb_p50_ms": 364.1,
+        "p50_ms": 365.1,
+        "p95_ms": 411.1,
         "media_ok": true,
-        "media_s": 1.29
+        "media_s": 1.27
       }
     },
     "shutdown": {
@@ -402,7 +522,17 @@
         "success": 0.0,
         "detail": "first 3 requests failed"
       },
+      "cdn-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
       "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
         "ok": false,
         "success": 0.0,
         "detail": "first 3 requests failed"
@@ -411,6 +541,300 @@
         "ok": false,
         "success": 0.0,
         "detail": "first 3 requests failed"
+      }
+    },
+    "sni-dpi-strict": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 68.2,
+        "p50_ms": 68.6,
+        "p95_ms": 147.2,
+        "media_ok": true,
+        "media_s": 0.16
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 120.8,
+        "p50_ms": 121.7,
+        "p95_ms": 123.5,
+        "media_ok": true,
+        "media_s": 0.16
+      }
+    },
+    "intl:sni-dpi": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 13.0,
+        "p50_ms": 13.1,
+        "p95_ms": 38.5,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 71.5,
+        "p50_ms": 71.6,
+        "p95_ms": 123.4,
+        "media_ok": true,
+        "media_s": 0.16
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 6.6,
+        "p50_ms": 7.1,
+        "p95_ms": 9.6,
+        "media_ok": true,
+        "media_s": 0.35
+      },
+      "hysteria2-plain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 121.1,
+        "p50_ms": 121.8,
+        "p95_ms": 123.9,
+        "media_ok": true,
+        "media_s": 0.17
+      }
+    },
+    "intl:udp-block": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.8,
+        "p50_ms": 9.1,
+        "p95_ms": 24.8,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 8.5,
+        "p50_ms": 9.0,
+        "p95_ms": 31.0,
+        "media_ok": true,
+        "media_s": 0.03
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 7.9,
+        "p50_ms": 8.0,
+        "p95_ms": 9.1,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 22.1,
+        "p50_ms": 22.6,
+        "p95_ms": 1009.4,
+        "media_ok": true,
+        "media_s": 0.01
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 75.9,
+        "p50_ms": 75.9,
+        "p95_ms": 143.9,
+        "media_ok": true,
+        "media_s": 0.1
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 121.0,
+        "p50_ms": 121.7,
+        "p95_ms": 123.5,
+        "media_ok": true,
+        "media_s": 0.17
+      }
+    },
+    "intl:allowlist-ip": {
+      "reality-vision": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-xhttp": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "reality-domain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "relay-ww": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 93.0,
+        "p50_ms": 93.1,
+        "p95_ms": 127.3,
+        "media_ok": true,
+        "media_s": 0.11
+      },
+      "hysteria2": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "hysteria2-plain": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      },
+      "paqet": {
+        "ok": false,
+        "success": 0.0,
+        "detail": "first 3 requests failed"
+      }
+    },
+    "intl:lossy-mobile": {
+      "reality-vision": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 640.9,
+        "p50_ms": 653.5,
+        "p95_ms": 1644.2,
+        "media_ok": true,
+        "media_s": 2.39
+      },
+      "reality-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 398.8,
+        "p50_ms": 399.0,
+        "p95_ms": 706.8,
+        "media_ok": true,
+        "media_s": 1.99
+      },
+      "reality-domain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 630.4,
+        "p50_ms": 630.5,
+        "p95_ms": 898.6,
+        "media_ok": true,
+        "media_s": 2.71
+      },
+      "relay-ww": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 485.5,
+        "p50_ms": 485.6,
+        "p95_ms": 1068.7,
+        "media_ok": true,
+        "media_s": 2.4
+      },
+      "cdn-xhttp": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 574.6,
+        "p50_ms": 619.4,
+        "p95_ms": 966.6,
+        "media_ok": true,
+        "media_s": 22.84
+      },
+      "hysteria2": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 329.5,
+        "p50_ms": 331.8,
+        "p95_ms": 464.5,
+        "media_ok": true,
+        "media_s": 1.47
+      },
+      "hysteria2-plain": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 332.8,
+        "p50_ms": 332.9,
+        "p95_ms": 636.9,
+        "media_ok": true,
+        "media_s": 0.93
+      },
+      "paqet": {
+        "ok": true,
+        "success": 1.0,
+        "ttfb_p50_ms": 401.7,
+        "p50_ms": 406.6,
+        "p95_ms": 531.1,
+        "media_ok": true,
+        "media_s": 1.34
       }
     }
   },
@@ -427,7 +851,8 @@
             "reality-vision",
             "reality-xhttp",
             "hysteria2",
-            "relay-ww"
+            "relay-ww",
+            "cdn-xhttp"
           ]
         },
         "trace": [
@@ -438,7 +863,8 @@
               "reality-vision",
               "reality-xhttp",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -448,7 +874,8 @@
               "reality-vision",
               "reality-xhttp",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -458,7 +885,8 @@
               "reality-vision",
               "reality-xhttp",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           }
         ],
@@ -475,7 +903,8 @@
           "ranking": [
             "reality-vision",
             "reality-xhttp",
-            "relay-ww"
+            "relay-ww",
+            "cdn-xhttp"
           ]
         },
         "trace": [
@@ -486,7 +915,8 @@
               "reality-vision",
               "reality-xhttp",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -495,7 +925,8 @@
             "ranking": [
               "reality-vision",
               "reality-xhttp",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -504,7 +935,8 @@
             "ranking": [
               "reality-vision",
               "reality-xhttp",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           }
         ],
@@ -529,7 +961,8 @@
             "ranking": [
               "reality-vision",
               "reality-xhttp",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -551,13 +984,15 @@
         "pass": true
       },
       {
-        "profile": "shutdown",
-        "expected_mode": "outage",
-        "expected_active": null,
+        "profile": "intl:allowlist-ip",
+        "expected_mode": "restricted",
+        "expected_active": "cdn-xhttp",
         "observed": {
-          "mode": "outage",
-          "active": "relay-ww",
-          "ranking": []
+          "mode": "restricted",
+          "active": "cdn-xhttp",
+          "ranking": [
+            "cdn-xhttp"
+          ]
         },
         "trace": [
           {
@@ -568,13 +1003,48 @@
             ]
           },
           {
+            "mode": "restricted",
+            "active": "cdn-xhttp",
+            "ranking": [
+              "cdn-xhttp"
+            ]
+          },
+          {
+            "mode": "restricted",
+            "active": "cdn-xhttp",
+            "ranking": [
+              "cdn-xhttp"
+            ]
+          }
+        ],
+        "cycles": 3,
+        "pass": true
+      },
+      {
+        "profile": "shutdown",
+        "expected_mode": "outage",
+        "expected_active": null,
+        "observed": {
+          "mode": "outage",
+          "active": "cdn-xhttp",
+          "ranking": []
+        },
+        "trace": [
+          {
+            "mode": "restricted",
+            "active": "cdn-xhttp",
+            "ranking": [
+              "cdn-xhttp"
+            ]
+          },
+          {
             "mode": "degraded",
-            "active": "relay-ww",
+            "active": "cdn-xhttp",
             "ranking": []
           },
           {
             "mode": "outage",
-            "active": "relay-ww",
+            "active": "cdn-xhttp",
             "ranking": []
           }
         ],
@@ -592,7 +1062,8 @@
             "reality-vision",
             "reality-xhttp",
             "hysteria2",
-            "relay-ww"
+            "relay-ww",
+            "cdn-xhttp"
           ]
         },
         "trace": [
@@ -610,7 +1081,8 @@
               "reality-vision",
               "hysteria2",
               "relay-ww",
-              "paqet"
+              "paqet",
+              "cdn-xhttp"
             ]
           },
           {
@@ -619,7 +1091,8 @@
             "ranking": [
               "reality-vision",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           },
           {
@@ -629,7 +1102,8 @@
               "reality-vision",
               "reality-xhttp",
               "hysteria2",
-              "relay-ww"
+              "relay-ww",
+              "cdn-xhttp"
             ]
           }
         ],
