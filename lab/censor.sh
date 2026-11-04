@@ -33,7 +33,8 @@ case "$P" in
     fw -p tcp -m connmark --mark 1 -j REJECT --reject-with tcp-reset
     fw -p tcp -m mark --mark 1 -j CONNMARK --save-mark
     fw -p tcp -m mark --mark 1 -j REJECT --reject-with tcp-reset
-    fw -p tcp --dport 443 -j NFQUEUE --queue-num 7 --queue-bypass
+    # every TCP port: REALITY/XHTTP on :80 is still TLS, a real DPI does not trust port numbers
+    fw -p tcp -j NFQUEUE --queue-num 7 --queue-bypass
     $C python3 "$HERE/dpi.py" --queue 7 --allow "$HERE/allowlist.txt" >"$RUN/dpi.log" 2>&1 &
     echo $! > "$RUN/dpi.pid"
     sleep 0.5 ;;
