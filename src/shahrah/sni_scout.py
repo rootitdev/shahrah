@@ -53,6 +53,7 @@ class ScoutResult:
     detail: str = ""
     architectures: tuple[str, ...] = ()
     dns: sni_dns.SniDnsCheck | None = None
+    cert_not_after: float | None = None  # epoch seconds of the leaf certificate's notAfter
 
     def with_arch(self) -> ScoutResult:
         """Tag survivors as REALITY-capable; CDN edges use operator-owned names, not these."""
@@ -100,7 +101,17 @@ def _handshake(host: str, port: int, timeout_s: float) -> ScoutResult:
                     tls.selected_alpn_protocol(),
                     "empty certificate",
                 )
-            return ScoutResult(host, True, latency, version, tls.selected_alpn_protocol(), "ok")
+            not_after = cert.get("notAfter")
+            expiry = ssl.cert_time_to_seconds(not_after) if isinstance(not_after, str) else None
+            return ScoutResult(
+                host,
+                True,
+                latency,
+                version,
+                tls.selected_alpn_protocol(),
+                "ok",
+                cert_not_after=expiry,
+            )
     except ssl.SSLCertVerificationError as exc:
         return ScoutResult(host, False, None, None, None, f"cert: {exc}")
     except (OSError, ssl.SSLError, TimeoutError) as exc:
