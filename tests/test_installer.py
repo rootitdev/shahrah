@@ -98,3 +98,65 @@ def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str)
     assert service.index("free_dns_port") < service.index("systemctl restart")
     assert "DNSStubListener=no" in text
     assert "grep -v '\"xray\"'" in text  # re-running must not mistake our own Xray for a conflict
+
+
+ARP = (
+    "IP address       HW type     Flags       HW address            Mask     Device\n"
+    "10.0.0.9         0x1         0x0         00:00:00:00:00:00     *        eth0\n"
+    "10.0.0.1         0x1         0x2         AA:BB:CC:00:11:22     *        eth0\n"
+)
+ROUTE = (
+    "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\n"
+    "eth0\t00000000\t0100000A\t0003\t0\t0\t0\t00000000\n"
+)
+
+
+def _source_and_run(tmp_path: Path, snippet: str) -> subprocess.CompletedProcess[str]:
+    bash = _find_bash()
+    if bash is None or not Path(bash).exists() or "System32" in bash:
+        pytest.skip("bash not available")
+    (tmp_path / "arp").write_text(ARP)
+    (tmp_path / "route").write_text(ROUTE)
+    script = (
+        f"export ARP_TABLE='{(tmp_path / 'arp').as_posix()}' "
+        f"ROUTE_TABLE='{(tmp_path / 'route').as_posix()}'\n"
+        f"source '{SCRIPT.as_posix()}'\n"
+        "ip() { return 0; }; ping() { return 1; }; arping() { return 1; }\n" + snippet
+    )
+    try:
+        return subprocess.run(
+            [bash, "-c", script], capture_output=True, text=True, check=False, timeout=20
+        )
+    except OSError:
+        pytest.skip("bash is not usable here")
+
+
+def test_gateway_discovery_falls_back_to_proc_tables(tmp_path: Path) -> None:
+    """No `ip route`/`ip neigh`/arping answer: /proc/net/route and /proc/net/arp still work."""
+    result = _source_and_run(
+        tmp_path,
+        'i="$(default_iface)"; g="$(default_gateway "$i")"; m="$(gateway_mac "$g" "$i")"\n'
+        'echo "$i $g $m"',
+    )
+    if "\x00" in result.stdout + result.stderr:
+        pytest.skip("bash is only the WSL launcher stub")
+    assert result.stdout.split() == ["eth0", "10.0.0.1", "aa:bb:cc:00:11:22"], result.stderr
+
+
+def test_gateway_mac_override_and_rejects_garbage(tmp_path: Path) -> None:
+    result = _source_and_run(
+        tmp_path,
+        "PAQET_ROUTER_MAC=AA:AA:AA:AA:AA:01 gateway_mac 10.0.0.1 eth0\n"
+        "PAQET_ROUTER_MAC=nonsense gateway_mac 10.0.0.1 eth0 || echo rejected",
+    )
+    if "\x00" in result.stdout + result.stderr:
+        pytest.skip("bash is only the WSL launcher stub")
+    assert result.stdout.split() == ["aa:aa:aa:aa:aa:01", "rejected"], result.stderr
+
+
+def test_new_data_planes_are_pinned(text: str) -> None:
+    for name in ("HY2_SHA256_AMD64", "HY2_SHA256_ARM64", "WW_SHA256_X64", "WW_SHA256_ARM64"):
+        value = re.search(rf'{name}="([0-9a-f]*)"', text)
+        assert value and len(value.group(1)) == 64, name
+    for flag in ("--with-hysteria2", "--hy2-hop", "--with-waterwall", "--ww-peer", "relay"):
+        assert flag in text

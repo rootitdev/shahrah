@@ -21,6 +21,16 @@ PAQET_VERSION="v1.0.0-alpha.21"
 PAQET_SHA256_AMD64="4f2f69e0493746726598485ef18df43372470a1514f8021594137e522f0f4fc7"
 PAQET_SHA256_ARM64="be5c7b35a0a93832063e1dc7fddeb76d4597fb9de76abdfdf7b8574b775e3885"
 
+# Hysteria2 QUIC/UDP social path (MIT, https://github.com/apernet/hysteria); opt-in.
+HY2_VERSION="app/v2.13.0"
+HY2_SHA256_AMD64="907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691"
+HY2_SHA256_ARM64="a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677a7"
+
+# WaterWall Iran<->exit backhaul (MPL-2.0, https://github.com/radkesvat/WaterWall); opt-in.
+WW_VERSION="v1.5.2"
+WW_SHA256_X64="1d9ba7da4a3ab42b5685e5ecf03cf3d93a97ede5fd9fce8a12dbfc23e04a829a"
+WW_SHA256_ARM64="56486a3a8d02a67f782d45a6155bea4e437348c72611a3f685459d97966ff96b"
+
 APP_DIR="/opt/shahrah"
 CONF_DIR="/etc/shahrah"
 SERVICE_USER="shahrah"
@@ -37,6 +47,14 @@ EXTRA_LISTENERS=()
 FIREWALL=1
 WITH_PAQET=0
 PAQET_PORT="9999"
+WITH_HY2=0
+HY2_PORT="8443"
+HY2_HOP=""
+WW_SIDE=""
+WW_PEER=""
+WW_SELF=""
+WW_MODE="reverse"
+WW_TUNNEL_PORT="8443"
 WORK_DIR=""
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 
@@ -48,7 +66,7 @@ usage() {
 Usage: install.sh --host HOST [options]      (VPN exit/entry node)
        install.sh --role brain               (health prober + panel steering)
 
-  --role ROLE       node (default) or brain
+  --role ROLE       node (default), brain, or relay (Iran relay: WaterWall only, no Xray)
   --host HOST       public domain or IP address clients connect to (node only, required)
   --target DOMAIN   TLS 1.3 site REALITY imitates (default: www.cloudflare.com)
   --profile NAME    reality-vision (default) or reality-xhttp
@@ -59,6 +77,17 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
   --with-paqet PORT also run a paqet server (raw-packet crisis path) on PORT (not 80/443)
+  --with-hysteria2 PORT
+                    also run a Hysteria2 server (salamander, social tuning) on UDP PORT
+  --hy2-hop LOW-HIGH
+                    UDP port-hopping range DNAT-ed to the Hysteria2 port
+  --with-waterwall iran|exit
+                    WaterWall backhaul side (relay role implies iran)
+  --ww-peer IP      the other server's public IP (required with --with-waterwall)
+  --ww-self IP      this server's public IP (default: auto-detect)
+  --ww-mode MODE    reverse (default: exit dials Iran) or direct
+  --ww-tunnel-port PORT
+                    inter-server leg port (default 8443)
   -h, --help        show this help
 EOF
 }
@@ -76,6 +105,13 @@ parse_args() {
       --ssh-port) SSH_PORT="${2:?--ssh-port needs a value}"; shift 2 ;;
       --no-firewall) FIREWALL=0; shift ;;
       --with-paqet) WITH_PAQET=1; PAQET_PORT="${2:?--with-paqet needs a PORT}"; shift 2 ;;
+      --with-hysteria2) WITH_HY2=1; HY2_PORT="${2:?--with-hysteria2 needs a PORT}"; shift 2 ;;
+      --hy2-hop) HY2_HOP="${2:?--hy2-hop needs LOW-HIGH}"; shift 2 ;;
+      --with-waterwall) WW_SIDE="${2:?--with-waterwall needs iran or exit}"; shift 2 ;;
+      --ww-peer) WW_PEER="${2:?--ww-peer needs an IP}"; shift 2 ;;
+      --ww-self) WW_SELF="${2:?--ww-self needs an IP}"; shift 2 ;;
+      --ww-mode) WW_MODE="${2:?--ww-mode needs reverse or direct}"; shift 2 ;;
+      --ww-tunnel-port) WW_TUNNEL_PORT="${2:?--ww-tunnel-port needs a PORT}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) usage >&2; die "unknown option: $1" ;;
     esac
@@ -83,7 +119,13 @@ parse_args() {
   case "$ROLE" in
     node) [[ -n "$HOST" ]] || { usage >&2; die "--host is required for a node"; } ;;
     brain) ;;
-    *) die "--role must be node or brain" ;;
+    relay) WW_SIDE="iran" ;;
+    *) die "--role must be node, brain or relay" ;;
+  esac
+  case "$WW_SIDE" in
+    "") ;;
+    iran|exit) [[ -n "$WW_PEER" ]] || die "--with-waterwall needs --ww-peer IP" ;;
+    *) die "--with-waterwall must be iran or exit" ;;
   esac
 }
 
@@ -159,6 +201,159 @@ install_xray() {
   log "installed $(/usr/local/bin/xray version | head -n 1)"
 }
 
+# --- gateway discovery (paqet crafts Ethernet frames, so it needs the next hop's MAC) ------
+# Each step falls back to the next: VPS images differ (no iproute2 neigh entry yet, onlink
+# /32 gateways, arping missing, containers without ping). Overridable for tests.
+ROUTE_TABLE="${ROUTE_TABLE:-/proc/net/route}"
+ARP_TABLE="${ARP_TABLE:-/proc/net/arp}"
+MAC_RE='^([0-9a-f]{2}:){5}[0-9a-f]{2}$'
+
+default_iface() {
+  local iface
+  iface="$(ip -4 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+  if [[ -z "$iface" && -r "$ROUTE_TABLE" ]]; then
+    iface="$(awk 'NR>1 && $2=="00000000" {print $1; exit}' "$ROUTE_TABLE")"
+  fi
+  printf '%s\n' "$iface"
+}
+
+default_gateway() {
+  local iface="$1" gw hex
+  gw="$(ip -4 route show default ${iface:+dev "$iface"} 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="via"){print $(i+1); exit}}')"
+  if [[ -z "$gw" && -r "$ROUTE_TABLE" ]]; then
+    # /proc/net/route stores the gateway as little-endian hex
+    hex="$(awk -v d="$iface" 'NR>1 && $2=="00000000" && (d=="" || $1==d) {print $3; exit}' "$ROUTE_TABLE")"
+    if [[ -n "$hex" && "$hex" != "00000000" ]]; then
+      gw="$(printf '%d.%d.%d.%d' "0x${hex:6:2}" "0x${hex:4:2}" "0x${hex:2:2}" "0x${hex:0:2}")"
+    fi
+  fi
+  printf '%s\n' "$gw"
+}
+
+gateway_mac() {
+  local gw="$1" iface="$2" mac=""
+  if [[ -n "${PAQET_ROUTER_MAC:-}" ]]; then
+    mac="${PAQET_ROUTER_MAC,,}"
+  elif [[ -n "$gw" ]]; then
+    ping -c1 -W1 "$gw" >/dev/null 2>&1 || true  # populate the neighbour table
+    mac="$(ip neigh show "$gw" ${iface:+dev "$iface"} 2>/dev/null \
+      | awk '!/FAILED|INCOMPLETE/ {for(i=1;i<=NF;i++) if($i=="lladdr"){print $(i+1); exit}}')"
+    if [[ -z "$mac" ]] && command -v arping >/dev/null 2>&1; then
+      mac="$(arping -c 2 -w 3 ${iface:+-I "$iface"} "$gw" 2>/dev/null \
+        | grep -oiE '([0-9a-f]{2}:){5}[0-9a-f]{2}' | head -n 1 || true)"
+    fi
+    if [[ -z "$mac" && -r "$ARP_TABLE" ]]; then
+      mac="$(awk -v gw="$gw" 'NR>1 && $1==gw && $3!="0x0" && $4!="00:00:00:00:00:00" {print $4; exit}' "$ARP_TABLE")"
+    fi
+  fi
+  if [[ -z "$mac" && -r "$ARP_TABLE" ]]; then
+    # onlink/point-to-point setups: the only complete neighbour on the uplink is the router
+    mac="$(awk -v d="$iface" 'NR>1 && $3!="0x0" && (d=="" || $6==d) {print $4; exit}' "$ARP_TABLE")"
+  fi
+  mac="${mac,,}"
+  [[ "$mac" =~ $MAC_RE ]] || return 1
+  printf '%s\n' "$mac"
+}
+
+arch_suffix() {
+  case "$(uname -m)" in
+    x86_64|amd64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) die "unsupported architecture: $(uname -m)" ;;
+  esac
+}
+
+install_hysteria2() {
+  local arch expected actual dir sni hop_args=() port_rule
+  arch="$(arch_suffix)"
+  [[ "$arch" == amd64 ]] && expected="$HY2_SHA256_AMD64" || expected="$HY2_SHA256_ARM64"
+  dir="$(mktemp -d)"
+  log "downloading hysteria ${HY2_VERSION}"
+  curl -fsSL --retry 3 -o "$dir/hysteria" \
+    "https://github.com/apernet/hysteria/releases/download/${HY2_VERSION}/hysteria-linux-${arch}"
+  actual="$(sha256sum "$dir/hysteria" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || die "checksum mismatch for hysteria (expected $expected, got $actual)"
+  install -m 0755 "$dir/hysteria" /usr/local/bin/hysteria
+  rm -rf "$dir"
+
+  # Self-signed certificate, pinned by clients (leaf DER sha256). Name: the node's domain, or
+  # the REALITY target when the node is addressed by IP.
+  if [[ "$HOST" =~ ^[0-9.]+$ || "$HOST" == *:* ]]; then sni="$TARGET"; else sni="$HOST"; fi
+  if [[ ! -s "$CONF_DIR/hy2.crt" ]]; then
+    command -v openssl >/dev/null || apt-get install -y -qq openssl >/dev/null
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+      -subj "/CN=${sni}" -addext "subjectAltName=DNS:${sni}" \
+      -keyout "$CONF_DIR/hy2.key" -out "$CONF_DIR/hy2.crt" 2>/dev/null
+  fi
+  chown root:"$SERVICE_USER" "$CONF_DIR/hy2.crt" "$CONF_DIR/hy2.key"
+  chmod 0640 "$CONF_DIR/hy2.crt" "$CONF_DIR/hy2.key"
+  [[ -z "$HY2_HOP" ]] || hop_args=(--hop "$HY2_HOP")
+  shahrah --state "$CONF_DIR/state.json" hysteria2 enable --port "$HY2_PORT" --sni "$sni" \
+    --cert "$CONF_DIR/hy2.crt" "${hop_args[@]}" >/dev/null
+  shahrah --state "$CONF_DIR/state.json" hysteria2 server --out "$CONF_DIR/hysteria2.yaml" >/dev/null
+  chown root:"$SERVICE_USER" "$CONF_DIR/hysteria2.yaml"
+  chmod 0640 "$CONF_DIR/hysteria2.yaml"
+  shahrah hysteria2 unit --unit-role server --config-path "$CONF_DIR/hysteria2.yaml" \
+    > /etc/systemd/system/shahrah-hysteria2.service
+  local line
+  while IFS= read -r line; do
+    # shellcheck disable=SC2086
+    ${line/ -A / -C } >/dev/null 2>&1 || $line
+  done < <(shahrah --state "$CONF_DIR/state.json" hysteria2 hop-rules --interface "$(default_iface)")
+  if [[ "$FIREWALL" -eq 1 ]] && command -v ufw >/dev/null; then
+    ufw allow "${HY2_PORT}/udp" >/dev/null
+    if [[ -n "$HY2_HOP" ]]; then port_rule="${HY2_HOP/-/:}/udp"; ufw allow "$port_rule" >/dev/null; fi
+  fi
+  systemctl daemon-reload
+  systemctl enable --now shahrah-hysteria2 >/dev/null
+  systemctl restart shahrah-hysteria2
+  log "hysteria2 on udp/${HY2_PORT}${HY2_HOP:+ (hop ${HY2_HOP})}; links now include hysteria2://"
+  log "  after user changes: shahrah hysteria2 server --out $CONF_DIR/hysteria2.yaml && systemctl restart shahrah-hysteria2"
+}
+
+install_waterwall() {
+  local arch expected actual dir self service="127.0.0.1:${PORT}" iran_ip exit_ip
+  arch="$(arch_suffix)"
+  if [[ "$arch" == amd64 ]]; then arch="x64"; expected="$WW_SHA256_X64"; else expected="$WW_SHA256_ARM64"; fi
+  dir="$(mktemp -d)"
+  log "downloading WaterWall ${WW_VERSION}"
+  curl -fsSL --retry 3 -o "$dir/ww.zip" \
+    "https://github.com/radkesvat/WaterWall/releases/download/${WW_VERSION}/Waterwall-linux-gcc-${arch}.zip"
+  actual="$(sha256sum "$dir/ww.zip" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || die "checksum mismatch for WaterWall (expected $expected, got $actual)"
+  unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
+  install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
+  rm -rf "$dir"
+
+  self="${WW_SELF:-$(ip -4 -o addr show dev "$(default_iface)" | awk '{split($4,a,"/"); print a[1]; exit}')}"
+  [[ -n "$self" ]] || die "waterwall: cannot detect this server's IP; pass --ww-self"
+  if [[ "$WW_SIDE" == iran ]]; then iran_ip="$self"; exit_ip="$WW_PEER"; else iran_ip="$WW_PEER"; exit_ip="$self"; fi
+  [[ -s "$CONF_DIR/backhaul.key" ]] || log "generating $CONF_DIR/backhaul.key: copy it to the peer before installing there"
+  install -d -m 0750 "$CONF_DIR/waterwall"
+  shahrah waterwall-config "$WW_SIDE" --iran-ip "$iran_ip" --exit-ip "$exit_ip" \
+    --key-file "$CONF_DIR/backhaul.key" --mode "$WW_MODE" --tunnel-port "$WW_TUNNEL_PORT" \
+    --exit-service "$service" --out-dir "$CONF_DIR/waterwall" >/dev/null
+  shahrah waterwall-config unit --workdir "$CONF_DIR/waterwall" > /etc/systemd/system/shahrah-waterwall.service
+  if [[ "$FIREWALL" -eq 1 ]] && command -v ufw >/dev/null; then
+    if [[ "$WW_SIDE" == iran ]]; then
+      ufw allow 443/tcp >/dev/null
+      [[ "$WW_MODE" == reverse ]] && ufw allow from "$WW_PEER" to any port "$WW_TUNNEL_PORT" proto tcp >/dev/null
+    elif [[ "$WW_MODE" == direct ]]; then
+      ufw allow from "$WW_PEER" to any port "$WW_TUNNEL_PORT" proto tcp >/dev/null
+    fi
+  fi
+  systemctl daemon-reload
+  systemctl enable --now shahrah-waterwall >/dev/null
+  systemctl restart shahrah-waterwall
+  log "waterwall ${WW_SIDE} (${WW_MODE}) up; peer ${WW_PEER}, tunnel port ${WW_TUNNEL_PORT}"
+}
+
+install_relay() {
+  [[ "$FIREWALL" -eq 0 ]] || { detect_ssh_port; ufw allow "${SSH_PORT}/tcp" >/dev/null; ufw --force enable >/dev/null; }
+  install_waterwall
+  log "relay ready: users keep their exit REALITY links, pointed at this server's IP"
+}
+
 install_paqet() {
   local arch expected actual iface ip gw mac dir
   case "$(uname -m)" in
@@ -177,12 +372,12 @@ install_paqet() {
   install -m 0755 "$dir/paqet_linux_${arch}" /usr/local/bin/paqet
   rm -rf "$dir"
 
-  iface="$(ip -4 route show default | awk '{print $5; exit}')"
-  gw="$(ip -4 route show default | awk '{print $3; exit}')"
+  iface="$(default_iface)"
+  gw="$(default_gateway "$iface")"
   ip="$(ip -4 -o addr show dev "$iface" | awk '{split($4,a,"/"); print a[1]; exit}')"
-  ping -c1 -W1 "$gw" >/dev/null 2>&1 || true
-  mac="$(ip neigh show "$gw" | awk '{for(i=1;i<=NF;i++) if($i=="lladdr") print $(i+1); exit}')"
-  [[ -n "$iface" && -n "$ip" && -n "$mac" ]] || die "paqet: cannot detect interface/ip/gateway MAC"
+  mac="$(gateway_mac "$gw" "$iface" || true)"
+  [[ -n "$iface" && -n "$ip" && -n "$mac" ]] \
+    || die "paqet: cannot detect interface/ip/gateway MAC (iface=${iface:-?} gw=${gw:-?}); set PAQET_ROUTER_MAC"
   shahrah paqet-config server --interface "$iface" --ip "$ip" --router-mac "$mac" \
     --port "$PAQET_PORT" --key-file "$CONF_DIR/paqet.key" --out "$CONF_DIR/paqet.yaml"
   local line
@@ -334,11 +529,17 @@ main() {
     install_brain
     return
   fi
+  if [[ "$ROLE" == "relay" ]]; then
+    install_relay
+    return
+  fi
   free_public_ports
   init_node
   install_service
   setup_firewall
   [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
+  [[ "$WITH_HY2" -eq 0 ]] || install_hysteria2
+  [[ -z "$WW_SIDE" ]] || install_waterwall
 
   log "done. Client link for user 'first' (keep it private):"
   shahrah --state "$CONF_DIR/state.json" link first
@@ -356,4 +557,7 @@ Next steps (see docs/OPERATOR.md):
 EOF
 }
 
-main "$@"
+# Sourcing the script (tests) only defines the functions.
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
