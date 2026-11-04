@@ -31,6 +31,22 @@ PRIVATE_NETWORKS: tuple[str, ...] = (
     "fe80::/10",
 )
 
+# What Xray 26's freedom outbound refuses by default for proxied traffic (private *and*
+# reserved/documentation/benchmark/multicast space). Other egress paths (Hysteria2) use the
+# same list so no data plane is a softer SSRF target than Xray.
+RESERVED_NETWORKS: tuple[str, ...] = (
+    "192.0.0.0/24",
+    "192.0.2.0/24",
+    "192.88.99.0/24",
+    "198.18.0.0/15",
+    "198.51.100.0/24",
+    "203.0.113.0/24",
+    "224.0.0.0/3",
+    "::/127",
+    "ff00::/8",
+)
+EGRESS_BLOCKED: tuple[str, ...] = PRIVATE_NETWORKS + RESERVED_NETWORKS
+
 VISION_FLOW = "xtls-rprx-vision"
 _API_TAG = "api"
 _API_INBOUND_TAG = "api-in"

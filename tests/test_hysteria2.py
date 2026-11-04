@@ -155,3 +155,15 @@ def test_server_rejects_private_and_loopback_egress() -> None:
     assert "acl:" in text
     for net in PRIVATE_NETWORKS:
         assert f'"reject({net})"' in text
+
+
+def test_server_egress_matches_xray_freedom_default_block() -> None:
+    """Parity with Xray 26 freedom: reserved/TEST-NET/benchmark/multicast are refused too."""
+    from shahrah.xray_config import EGRESS_BLOCKED, RESERVED_NETWORKS
+
+    text = hy.render_server(_settings(), [USER])
+    for net in ("198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/3"):
+        assert net in RESERVED_NETWORKS
+        assert f'"reject({net})"' in text
+    acl = [ln for ln in text.splitlines() if ln.strip().startswith('- "reject(')]
+    assert len(acl) == len(EGRESS_BLOCKED)
