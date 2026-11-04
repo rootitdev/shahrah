@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
@@ -30,6 +31,7 @@ from . import (
     sni_scout,
     sni_watch,
     subserve,
+    tactics,
     vantage,
 )
 from . import soak as soakmod
@@ -412,6 +414,21 @@ def _build_parser() -> argparse.ArgumentParser:
     sub_cmd.add_argument(
         "--print-secret", action="store_true", help="generate a path secret and exit"
     )
+    sub_cmd.add_argument(
+        "--tactics",
+        type=Path,
+        help="signed tactics envelope (tactics-sign) served at /<secret>/<label>/tactics",
+    )
+
+    tsign = sub.add_parser(
+        "tactics-sign",
+        help="sign per-ASN tactics profiles (key from SHAHRAH_TACTICS_KEY, hex)",
+    )
+    tsign.add_argument("profiles", type=Path, help="JSON list of tactics profiles")
+    tsign.add_argument("--serial", type=int, required=True)
+    tsign.add_argument("--kid", default="k1")
+    tsign.add_argument("--ttl-days", type=float, default=7.0)
+    tsign.add_argument("--out", type=Path, required=True)
 
     cap = sub.add_parser(
         "capacity",
@@ -976,6 +993,27 @@ def _run(args: argparse.Namespace) -> int:
         out.write(secrets.token_urlsafe(32) + "\n")
         return 0
 
+    if args.command == "tactics-sign":
+        key_hex = os.environ.get("SHAHRAH_TACTICS_KEY", "").strip()
+        if not key_hex:
+            raise ConfigError("set SHAHRAH_TACTICS_KEY (hex, >= 32 bytes)")
+        try:
+            key = bytes.fromhex(key_hex)
+            items = json.loads(args.profiles.read_text(encoding="utf-8"))
+        except (ValueError, OSError) as exc:
+            raise ConfigError(f"cannot read key or profiles: {exc}") from exc
+        now = int(time.time())
+        bundle = tactics.TacticsBundle(
+            serial=args.serial,
+            issued_at=now,
+            expires_at=now + int(args.ttl_days * 86400),
+            profiles=tuple(tactics.TacticsProfile.from_dict(item) for item in items),
+        )
+        envelope = tactics.sign(bundle, key, args.kid)
+        write_private_file(args.out, json.dumps(envelope) + "\n")
+        out.write(f"signed {len(bundle.profiles)} profiles serial={bundle.serial}\n")
+        return 0
+
     if args.command == "capacity":
         plan = capacity.plan_for_users(args.users)
         if args.json:
@@ -1185,7 +1223,13 @@ def _run(args: argparse.Namespace) -> int:
         for label in labels:
             out.write(subserve.subscription_url(host or "127.0.0.1", port, secret, label) + "\n")
         out.write("(serving; Ctrl-C to stop)\n")
-        subserve.serve(state_path, secret, host=host or "127.0.0.1", port=port)
+        subserve.serve(
+            state_path,
+            secret,
+            host=host or "127.0.0.1",
+            port=port,
+            tactics_path=args.tactics,
+        )
         return 0
 
     if args.command == "apply":

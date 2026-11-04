@@ -199,3 +199,40 @@ def test_bad_configs_are_rejected(
     mutate(data)  # type: ignore[operator]
     with pytest.raises(ConfigError, match=message):
         BrainConfig.from_json(json.dumps(data))
+
+
+def test_mode_hook_fires_on_crisis_transitions() -> None:
+    from shahrah.brain import CRISIS_MODES
+    from shahrah.models import Endpoint as Ep
+    from shahrah.models import Profile as Pr
+    from shahrah.models import User as Us
+
+    key = "A" * 43
+    eps = (
+        Ep("a", "a.example.com", 443, Pr.REALITY_VISION, key, "ab", "www.example.com"),
+        Ep("b", "b.example.com", 443, Pr.REALITY_VISION, key, "ab", "www.example.com"),
+        Ep(
+            "lock",
+            "c.example.com",
+            53,
+            Pr.REALITY_XHTTP,
+            key,
+            "ab",
+            "www.example.com",
+            lockdown_capable=True,
+        ),
+    )
+    cfg = BrainConfig(endpoints=eps, probe_user=Us.create("probe"), remarks={})
+    up = {"a": True, "b": True, "lock": True}
+    allowlist = {"a": False, "b": False, "lock": True}
+    seen: list[tuple[Mode, Mode]] = []
+
+    def hook(prev: Mode, cur: Mode) -> None:
+        seen.append((prev, cur))
+        raise RuntimeError("operator bug must not kill the loop")
+
+    brain = Brain(cfg, Script(up, *[allowlist] * 4), clock=lambda: 0.0, on_mode_change=hook)
+    for _ in range(5):
+        brain.cycle()
+    assert seen[-1] == (Mode.NORMAL, Mode.RESTRICTED)
+    assert brain.crisis and Mode.RESTRICTED in CRISIS_MODES

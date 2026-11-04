@@ -30,6 +30,10 @@ ControlSource = Callable[[], Mapping[str, bool]]
 BurnHook = Callable[[Sequence[str]], None]
 ReportSink = Callable[[Sequence[ProbeResult]], None]
 Clock = Callable[[], float]
+# Called as hook(previous_mode, new_mode) on every mode change; drives the crisis tier.
+ModeHook = Callable[[Mode, Mode], None]
+
+CRISIS_MODES = frozenset({Mode.RESTRICTED, Mode.OUTAGE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +111,7 @@ class Brain:
         control_source: ControlSource | None = None,
         on_burn: BurnHook | None = None,
         report_sink: ReportSink | None = None,
+        on_mode_change: ModeHook | None = None,
     ) -> None:
         self._config = config
         self._specs = config.specs()
@@ -116,6 +121,7 @@ class Brain:
         self._control_source = control_source
         self._on_burn = on_burn
         self._report_sink = report_sink
+        self._on_mode_change = on_mode_change
         self._state = OracleState()
         self._burn_state = BurnState()
         self._promoted: set[str] = set()
@@ -148,6 +154,7 @@ class Brain:
             log.info("active path -> %s (%s)", decision.state.active, decision.reason)
         if decision.state.mode is not previous_mode:
             log.warning("mode %s -> %s", previous_mode, decision.state.mode)
+            self._notify_mode(previous_mode, decision.state.mode)
 
         self._publish_report(results)
         self._detect_burn(results)
@@ -158,6 +165,20 @@ class Brain:
             self._promoted = promoted
         self._sync_panel(serving)
         return decision
+
+    @property
+    def crisis(self) -> bool:
+        """True while allowlist-style filtering (restricted) or a full outage is detected."""
+        return self._state.mode in CRISIS_MODES
+
+    def _notify_mode(self, previous: Mode, current: Mode) -> None:
+        if self._on_mode_change is None:
+            return
+        try:
+            self._on_mode_change(previous, current)
+        except Exception:
+            # Operator code (e.g. start paqet); the loop must survive it.
+            log.exception("mode-change hook failed")
 
     def _publish_report(self, results: Sequence[ProbeResult]) -> None:
         if self._report_sink is None:
@@ -241,4 +262,4 @@ def describe(decision: Decision) -> dict[str, Any]:
     }
 
 
-__all__ = ["Brain", "BrainConfig", "Mode", "describe", "run_forever"]
+__all__ = ["CRISIS_MODES", "Brain", "BrainConfig", "Mode", "ModeHook", "describe", "run_forever"]

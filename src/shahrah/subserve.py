@@ -23,7 +23,11 @@ def generate_path_secret() -> str:
     return secrets.token_urlsafe(24)
 
 
-def make_handler(state_path: Path, path_secret: str) -> type[BaseHTTPRequestHandler]:
+def make_handler(
+    state_path: Path, path_secret: str, tactics_path: Path | None = None
+) -> type[BaseHTTPRequestHandler]:
+    """``tactics_path``: optional pre-signed tactics envelope (``tactics.sign``) served at
+    ``/<secret>/<label>/tactics`` next to the subscription."""
     if len(path_secret) < 16:
         raise ConfigError("subscription path secret must be at least 16 characters")
 
@@ -36,6 +40,8 @@ def make_handler(state_path: Path, path_secret: str) -> type[BaseHTTPRequestHand
             parts = [p for p in parsed.path.split("/") if p]
             if len(parts) == 2 and parts[0] == path_secret:
                 return self._sub(parts[1])
+            if len(parts) == 3 and parts[0] == path_secret and parts[2] == "tactics":
+                return self._tactics()
             if parsed.path in {"/", "/health"}:
                 body = b"ok\n"
                 self.send_response(200)
@@ -46,6 +52,24 @@ def make_handler(state_path: Path, path_secret: str) -> type[BaseHTTPRequestHand
                 return
             self.send_response(404)
             self.end_headers()
+
+        def _tactics(self) -> None:
+            body = b""
+            if tactics_path is not None:
+                try:
+                    body = tactics_path.read_bytes()
+                except OSError:
+                    body = b""
+            if not body:
+                self.send_response(404)
+                self.end_headers()
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _sub(self, label: str) -> None:
             try:
@@ -77,13 +101,14 @@ def serve(
     host: str = "127.0.0.1",
     port: int = 8788,
     forever: bool = True,
+    tactics_path: Path | None = None,
 ) -> ThreadingHTTPServer:
     public_all = "0.0.0.0"  # noqa: S104
     if host not in {"127.0.0.1", "::1", "localhost", public_all}:
         raise ConfigError("subscription listen address must be loopback or 0.0.0.0")
     # Touch the state once so a missing file fails before we bind.
     load_state(state_path)
-    server = ThreadingHTTPServer((host, port), make_handler(state_path, path_secret))
+    server = ThreadingHTTPServer((host, port), make_handler(state_path, path_secret, tactics_path))
     if forever:
         server.serve_forever()
     else:
