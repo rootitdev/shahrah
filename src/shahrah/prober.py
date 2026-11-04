@@ -314,6 +314,10 @@ class XrayProbeSession:
             self._tmp.cleanup()
             self._tmp = None
 
+    def socks_port(self, endpoint_name: str) -> int:
+        """Loopback SOCKS port of one endpoint (for workload tools that drive the tunnel)."""
+        return self._ports[endpoint_name]
+
     @property
     def endpoint_names(self) -> list[str]:
         return list(self._ports)
