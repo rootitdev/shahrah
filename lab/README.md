@@ -66,3 +66,18 @@ It cannot show:
 Known, expected result: `relay-ww` (client → iran relay with SNI `cover.lab`) trips the
 SNI/IP-mismatch rule under `sni-dpi`, because the iran IP is not where `cover.lab` resolves.
 A real deployment needs an SNI that resolves to (or is plausible for) the relay's IP.
+
+## Findings worth knowing (see RESULTS.md for numbers)
+
+- REALITY with a borrowed SNI dies under an SNI/IP-mismatch DPI, on any port. Only a cover
+  whose name really resolves to the exit (or a relay) survives it.
+- `relay-ww` (client → iran relay, SNI `cover.lab`) trips the same mismatch rule. It is the
+  only path left under `allowlist-ip`, so the relay SNI must be plausible for the relay's IP.
+- Hysteria2 passes `sni-dpi` only because this DPI does not parse QUIC Initials; real Iranian
+  middleboxes do block QUIC by SNI. Treat that cell as optimistic.
+- paqet has a ~120 ms TTFB floor even on a clean link (KCP pacing). It is a rescue path, not a
+  daily driver. It survives every UDP and SNI profile and dies under allowlist/shutdown.
+- With strict conntrack (`nf_conntrack_tcp_loose=0`), paqet's handshake-less TCP is not
+  "ESTABLISHED" and dies under icmp-only. A loose stateful firewall would let it through.
+- In `outage` the brain keeps the last active path (ranking is empty) instead of clearing it;
+  that avoids flapping and is how it is meant to behave.
