@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from quic import client_hello_record  # noqa: E402
+from quic import InitialReassembler, is_initial  # noqa: E402
 
 NETLINK_NETFILTER = 12
 NFNL_SUBSYS_QUEUE = 3
@@ -84,16 +84,24 @@ def udp_payload(ip_packet: bytes) -> tuple[str, int, bytes]:
 
 
 def judge_udp(
-    payload: bytes, dst_ip: str, allow: dict[str, set[str]], strict: bool
+    payload: bytes,
+    dst_ip: str,
+    allow: dict[str, set[str]],
+    strict: bool,
+    initials: InitialReassembler | None = None,
 ) -> tuple[str | None, str]:
-    """(sni, verdict) for the first packet of a UDP flow. QUIC Initials are decrypted and their
-    SNI judged like TLS; anything unreadable passes, or is dropped in strict mode (the
-    "unknown protocol" policy that hits salamander-obfuscated Hysteria2 and WireGuard)."""
-    record = client_hello_record(payload)
-    if record is None:
+    """(sni, verdict) for one of the first packets of a UDP flow.
+
+    QUIC Initials are decrypted and reassembled across packets, and their SNI is judged like
+    TLS ("pass" while the hello is still incomplete). Anything that is not QUIC passes, or in
+    strict mode is dropped: the "unknown protocol" policy that hits salamander-obfuscated
+    Hysteria2 and WireGuard.
+    """
+    if not is_initial(payload):
         return None, "block-unknown" if strict else "pass"
-    sni = parse_sni(record)
-    return sni, decide(sni, dst_ip, allow) if sni else ("block-unknown" if strict else "pass")
+    record = (initials or InitialReassembler()).feed(payload)
+    sni = parse_sni(record) if record else None
+    return sni, decide(sni, dst_ip, allow)
 
 
 def flow_key(ip_packet: bytes) -> tuple[bytes, bytes] | None:
@@ -193,6 +201,7 @@ def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> Non
     sock.send(_msg(MSG_CONFIG, queue, _attr(CFG_PARAMS, params), NLM_F_REQUEST | NLM_F_ACK))
     print(f"dpi: bound to queue {queue}, allowlist {sorted(allow)}", flush=True)
     hellos = HelloReassembler()
+    initials = InitialReassembler()
     while True:
         data = sock.recv(1 << 17)
         pos = 0
@@ -206,7 +215,7 @@ def run(queue: int, allow: dict[str, set[str]], strict_udp: bool = False) -> Non
                 packet = attrs.get(A_PAYLOAD, b"")
                 if len(packet) > 9 and packet[9] == 17:
                     dst, _, payload = udp_payload(packet)
-                    sni, verdict = judge_udp(payload, dst, allow, strict_udp)
+                    sni, verdict = judge_udp(payload, dst, allow, strict_udp, initials)
                     if DUMP_DIR is not None and len(list(DUMP_DIR.glob("udp-*.bin"))) < 8:
                         (DUMP_DIR / f"udp-{pkt_id}.bin").write_bytes(payload)
                     if verdict != "pass" and sni is None:

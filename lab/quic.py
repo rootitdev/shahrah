@@ -123,13 +123,21 @@ def _varint(buf: bytes, pos: int) -> tuple[int, int]:
     return val, pos + n
 
 
-def initial_crypto_data(packet: bytes) -> bytes | None:
-    """Contiguous CRYPTO stream bytes from offset 0 of a client QUIC v1 Initial, else None."""
+def is_initial(packet: bytes) -> bool:
+    """Long header, QUIC v1, packet type Initial."""
+    return (
+        len(packet) >= 64
+        and bool(packet[0] & 0x80)
+        and (packet[0] & 0x30) == 0
+        and packet[1:5] == b"\x00\x00\x00\x01"
+    )
+
+
+def initial_crypto_chunks(packet: bytes) -> tuple[bytes, dict[int, bytes]] | None:
+    """(dcid, {offset: CRYPTO bytes}) of one client QUIC v1 Initial, or None."""
+    if not is_initial(packet):
+        return None
     try:
-        if len(packet) < 64 or not packet[0] & 0x80 or (packet[0] & 0x30) != 0:
-            return None  # not a long-header Initial
-        if packet[1:5] != b"\x00\x00\x00\x01":
-            return None
         pos = 5
         dcid = packet[pos + 1 : pos + 1 + packet[pos]]
         pos += 1 + packet[pos]
@@ -138,16 +146,13 @@ def initial_crypto_data(packet: bytes) -> bytes | None:
         pos += tok_len
         length, pos = _varint(packet, pos)
         key, iv, hp = initial_keys(dcid)
-        sample = packet[pos + 4 : pos + 20]
-        mask = aes128_encrypt_block(hp, sample)
-        first = packet[0] ^ (mask[0] & 0x0F)
-        pn_len = (first & 0x03) + 1
-        pn = bytes(
-            a ^ b for a, b in zip(packet[pos : pos + pn_len], mask[1 : 1 + pn_len], strict=True)
-        )
+        mask = aes128_encrypt_block(hp, packet[pos + 4 : pos + 20])
+        pn_len = ((packet[0] ^ (mask[0] & 0x0F)) & 0x03) + 1
+        pn = bytes(a ^ b for a, b in zip(packet[pos : pos + pn_len], mask[1:], strict=False))
         nonce = bytes(a ^ b for a, b in zip(iv, pn.rjust(12, b"\0"), strict=True))
-        ciphertext = packet[pos + pn_len : pos + length - 16]
-        plain = aes128_ctr(key, nonce + b"\x00\x00\x00\x02", ciphertext)
+        plain = aes128_ctr(
+            key, nonce + b"\x00\x00\x00\x02", packet[pos + pn_len : pos + length - 16]
+        )
     except IndexError:
         return None
     chunks: dict[int, bytes] = {}
@@ -157,25 +162,64 @@ def initial_crypto_data(packet: bytes) -> bytes | None:
             ftype = plain[i]
             if ftype in (0x00, 0x01):  # PADDING, PING
                 i += 1
-            elif ftype == 0x06:  # CRYPTO
+            elif ftype == 0x06:  # CRYPTO (quic-go/Chrome split and shuffle these)
                 off, i = _varint(plain, i + 1)
                 ln, i = _varint(plain, i)
                 chunks[off] = plain[i : i + ln]
                 i += ln
             else:
-                break  # ACK/CONNECTION_CLOSE etc. are not in a first client Initial
+                break  # ACK/CONNECTION_CLOSE are not in a first client Initial
     except IndexError:
         pass
+    return dcid, chunks
+
+
+def _contiguous(chunks: dict[int, bytes]) -> bytes:
     data, off = b"", 0
-    while off in chunks and chunks[off]:
-        data += chunks[off]
-        off += len(chunks[off])
-    return data or None
+    while True:
+        nxt = [(o, c) for o, c in chunks.items() if o <= off < o + len(c)]
+        if not nxt:
+            return data
+        o, c = nxt[0]
+        data += c[off - o :]
+        off = o + len(c)
 
 
-def client_hello_record(packet: bytes) -> bytes | None:
-    """The ClientHello as a TLS record (so the TCP SNI parser can read it), or None."""
-    hs = initial_crypto_data(packet)
+def _record(hs: bytes) -> bytes | None:
     if not hs or hs[0] != 0x01:
         return None
     return b"\x16\x03\x01" + len(hs).to_bytes(2, "big") + hs
+
+
+def initial_crypto_data(packet: bytes) -> bytes | None:
+    """Contiguous CRYPTO bytes from offset 0 of one Initial, else None."""
+    got = initial_crypto_chunks(packet)
+    return (_contiguous(got[1]) or None) if got else None
+
+
+def client_hello_record(packet: bytes) -> bytes | None:
+    """The (possibly partial) ClientHello of one Initial as a TLS record, or None."""
+    return _record(initial_crypto_data(packet) or b"")
+
+
+class InitialReassembler:
+    """Joins CRYPTO frames across the client's Initial packets, keyed by DCID.
+
+    A post-quantum ClientHello (~2 KB) needs two Initials, and quic-go/Chrome split and shuffle
+    CRYPTO frames, so the first packet alone often carries only a few bytes from offset 0
+    (found in the lab with Hysteria2: 56 of 1976 bytes).
+    """
+
+    def __init__(self) -> None:
+        self._flows: dict[bytes, dict[int, bytes]] = {}
+
+    def feed(self, packet: bytes) -> bytes | None:
+        got = initial_crypto_chunks(packet)
+        if got is None:
+            return None
+        dcid, chunks = got
+        if len(self._flows) > 4096:
+            self._flows.clear()
+        flow = self._flows.setdefault(dcid, {})
+        flow.update(chunks)
+        return _record(_contiguous(flow))

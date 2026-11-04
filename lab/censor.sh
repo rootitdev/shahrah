@@ -49,10 +49,11 @@ dpi() { # extra dpi.py args...
   fw -m mark --mark 1 -j CONNMARK --save-mark
   fw -p tcp -m mark --mark 1 -j REJECT --reject-with tcp-reset
   fw -p udp -m mark --mark 1 -j DROP
-  # every TCP port (REALITY/XHTTP on :80 is still TLS) and the first packet of each UDP flow
-  # (a QUIC Initial carries the ClientHello; later packets are opaque anyway)
+  # every TCP port (REALITY/XHTTP on :80 is still TLS) and the first packets of each UDP flow
+  # (a post-quantum QUIC ClientHello spans two Initials; later packets are opaque anyway)
   fw -p tcp -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
-  fw -p udp ! --dport 53 -m conntrack --ctstate NEW -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
+  fw -p udp ! --dport 53 -m connbytes --connbytes 0:4 --connbytes-dir original \
+    --connbytes-mode packets -j NFQUEUE --queue-num "$QUEUE" --queue-bypass
   $C python3 "$HERE/dpi.py" --queue "$QUEUE" --allow "$HERE/allowlist.txt" "$@" \
     >"$RUN/dpi-$LEG.log" 2>&1 &
   echo $! > "$RUN/dpi-$LEG.pid"

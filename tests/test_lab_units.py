@@ -104,8 +104,18 @@ import quic  # noqa: E402
 
 def _quic_initial(dcid: bytes, handshake: bytes) -> bytes:
     """A client QUIC v1 Initial carrying ``handshake`` in one CRYPTO frame (RFC 9001 sec. 5)."""
+    return _quic_initial_at(dcid, 0, handshake)
+
+
+def _quic_initial_at(dcid: bytes, offset: int, data: bytes) -> bytes:
     key, iv, hp = quic.initial_keys(dcid)
-    frame = b"\x06\x00" + (0x4000 | len(handshake)).to_bytes(2, "big") + handshake
+    handshake = data
+    frame = (
+        b"\x06"
+        + (0x4000 | offset).to_bytes(2, "big")
+        + (0x4000 | len(handshake)).to_bytes(2, "big")
+        + handshake
+    )
     plain = frame + b"\x00" * max(0, 1162 - len(frame))
     pn = b"\x02"
     length = len(pn) + len(plain) + 16
@@ -148,3 +158,15 @@ def test_dpi_reads_sni_from_quic_initial_and_strict_mode_drops_opaque_udp() -> N
     opaque = bytes(range(256)) * 5  # salamander-obfuscated Hysteria2 looks like this
     assert dpi.judge_udp(opaque, "10.0.4.2", ALLOW, strict=False) == (None, "pass")
     assert dpi.judge_udp(opaque, "10.0.4.2", ALLOW, strict=True) == (None, "block-unknown")
+
+
+def test_quic_hello_split_over_two_initials_is_reassembled() -> None:
+    """quic-go sends a ~2 KB post-quantum hello in two Initials with shuffled CRYPTO frames."""
+    handshake = _client_hello("exit.lab")[5:]
+    dcid = bytes.fromhex("1122334455667788")
+    cut = 20
+    first = _quic_initial(dcid, handshake[:cut])
+    second_frame = _quic_initial_at(dcid, cut, handshake[cut:])
+    asm = quic.InitialReassembler()
+    assert dpi.judge_udp(first, "10.0.4.2", ALLOW, False, asm) == (None, "pass")
+    assert dpi.judge_udp(second_frame, "10.0.4.2", ALLOW, False, asm) == ("exit.lab", "block-sni")

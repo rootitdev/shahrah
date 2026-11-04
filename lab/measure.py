@@ -22,6 +22,7 @@ sys.path.insert(0, str(HERE.parent / "src"))
 
 from shahrah.brain import Brain, BrainConfig, Sidecar  # noqa: E402
 from shahrah import hysteria2 as hy2mod  # noqa: E402
+from shahrah import prober as prober_mod  # noqa: E402
 from shahrah.hysteria2 import Hy2ProbeSession  # noqa: E402
 from shahrah.oracle import OracleConfig  # noqa: E402
 from shahrah.prober import (  # noqa: E402
@@ -83,6 +84,23 @@ def censor(client: str, intl: str = "open") -> None:
             stdout=subprocess.DEVNULL,
         )
     time.sleep(1.0)
+
+
+def _trust_lab_ca(render):  # noqa: ANN001, ANN202
+    """Xray ignores SSL_CERT_FILE; let TLS outbounds (the cdn.lab edge) verify the lab CA."""
+
+    def wrapped(*a, **kw):  # noqa: ANN002, ANN003, ANN202
+        cfg = render(*a, **kw)
+        for ob in cfg.get("outbounds", []):
+            tls = ob.get("streamSettings", {}).get("tlsSettings")
+            if tls is not None:
+                tls["certificates"] = [{"usage": "verify", "certificateFile": str(RUN / "ca.crt")}]
+        return cfg
+
+    return wrapped
+
+
+prober_mod.render_probe_config = _trust_lab_ca(prober_mod.render_probe_config)
 
 
 class PlainHy2(Hy2ProbeSession):
