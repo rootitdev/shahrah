@@ -1090,7 +1090,7 @@ def _run_warp(args: argparse.Namespace, state_path: Path, state: NodeState, out:
     if args.action == "enable":
         if args.profile is None:
             raise ConfigError("warp enable needs --profile /path/to/wgcf-profile.conf")
-        settings = warp.load_wgcf_profile(args.profile)
+        settings = warp.ipv4_only(warp.load_wgcf_profile(args.profile))
         # dataclasses.replace-style via with_warp after rebuilding flags
         from dataclasses import replace as _replace
 
@@ -1685,7 +1685,9 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "apply":
         if not state.users:
             raise ConfigError("no users yet: run `shahrah user add <label>` first")
-        text = dumps(render_server_config(state.server_settings(), list(state.users), warp=state.warp))
+        text = dumps(
+            render_server_config(state.server_settings(), list(state.users), warp=state.warp)
+        )
         if not args.no_validate:
             _validate_with_xray(args.xray_bin, text)
         _write_service_config(args.config_out, text, args.group)

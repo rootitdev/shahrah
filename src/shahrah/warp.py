@@ -10,6 +10,7 @@ from __future__ import annotations
 import configparser
 import io
 import re
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,6 @@ from .models import ConfigError
 # Domains (and suffixes) that must not see the EXIT's Webdade-tagged address.
 WARP_DOMAIN_SUFFIXES: tuple[str, ...] = (
     "google.com",
-    "google.com.",
     "googleapis.com",
     "gstatic.com",
     "googleusercontent.com",
@@ -31,8 +31,6 @@ WARP_DOMAIN_SUFFIXES: tuple[str, ...] = (
     "google.com.ir",
     "google.co.uk",
     "google.de",
-    "gemini.google.com",
-    "play.google.com",
     "android.com",
     "googleadservices.com",
     "gvt1.com",
@@ -124,6 +122,38 @@ def load_wgcf_profile(path: Path) -> WarpSettings:
     return parse_wgcf_profile(path.read_text(encoding="utf-8"))
 
 
+def _engage_ipv4_endpoint(endpoint: str) -> str:
+    """Resolve a hostname engage endpoint to an IPv4 ``ip:port`` (no v6 AAAA)."""
+    host, _, port = endpoint.rpartition(":")
+    if not host or not port:
+        return endpoint
+    if not any(c.isalpha() for c in host):
+        return endpoint  # already literal
+    try:
+        infos = socket.getaddrinfo(host, int(port), socket.AF_INET, socket.SOCK_DGRAM)
+    except (socket.gaierror, OSError, ValueError):
+        return endpoint
+    if not infos:
+        return endpoint
+    ip = infos[0][4][0]
+    return f"{ip}:{port}"
+
+
+def ipv4_only(settings: WarpSettings) -> WarpSettings:
+    """Drop IPv6 WARP address and pin an IPv4 engage endpoint.
+
+    IPv6 WARP exits are often geolocated outside NL (field: RU). Hostname endpoints
+    can resolve to AAAA; force an A-record ``ip:port`` so ForceIPv4 stays on CF IPv4.
+    """
+    from dataclasses import replace
+
+    return replace(
+        settings,
+        address_v6="",
+        endpoint=_engage_ipv4_endpoint(settings.endpoint),
+    )
+
+
 def xray_outbound(settings: WarpSettings) -> dict[str, Any]:
     """Xray WireGuard outbound that dials Cloudflare WARP."""
     addresses = [settings.address_v4]
@@ -154,8 +184,6 @@ def xray_routing_rules(settings: WarpSettings) -> list[dict[str, Any]]:
     domains: list[str] = []
     for suffix in WARP_DOMAIN_SUFFIXES:
         s = suffix.rstrip(".")
-        if s.startswith("play.") or s.startswith("gemini."):
-            domains.append(f"full:{s}")
         domains.append(f"domain:{s}")
     # unique preserve order
     seen: set[str] = set()
@@ -169,14 +197,16 @@ def xray_routing_rules(settings: WarpSettings) -> list[dict[str, Any]]:
 
 def hy2_outbounds(settings: WarpSettings) -> list[str]:
     """YAML lines for Hysteria2 outbounds that bind to the WARP interface."""
-    # Prefer binding to the WARP interface once wg-quick has brought it up.
     return [
         "outbounds:",
         "  - name: direct",
         "    type: direct",
+        "    direct:",
+        '      mode: "4"',
         "  - name: warp",
         "    type: direct",
         "    direct:",
+        '      mode: "4"',
         f"      bindDevice: {settings.interface}",
     ]
 
@@ -203,7 +233,14 @@ def hy2_acl_route_all(settings: WarpSettings) -> list[str]:
 
 
 def wg_quick_conf(settings: WarpSettings) -> str:
-    """Render a wg-quick profile for the WARP interface (Hy2 bindDevice)."""
+    """Render a wg-quick profile for Hy2 ``bindDevice`` only.
+
+    Safe defaults (never steal the host default route or DNS):
+    * ``Table = off`` — no policy routing / main-table changes
+    * no ``DNS =`` line — leave systemd-resolved alone
+    * ``MTU = 1280`` — fits under EXIT eth0 MTU 1400 with WG overhead
+    * ``AllowedIPs = 0.0.0.0/0`` is fine with Table=off (no routes installed)
+    """
     addrs = settings.address_v4
     if settings.address_v6:
         addrs = f"{settings.address_v4}, {settings.address_v6}"
@@ -211,8 +248,8 @@ def wg_quick_conf(settings: WarpSettings) -> str:
         "[Interface]\n"
         f"PrivateKey = {settings.private_key}\n"
         f"Address = {addrs}\n"
-        f"DNS = {settings.dns}\n"
-        "Table = off\n"  # Xray owns default routing; Hy2 binds by device
+        "MTU = 1280\n"
+        "Table = off\n"
         "\n[Peer]\n"
         f"PublicKey = {settings.peer_public_key}\n"
         "AllowedIPs = 0.0.0.0/0, ::/0\n"

@@ -16,7 +16,6 @@ from typing import Any, cast
 
 from . import keys
 from .hysteria2 import Hy2Settings, share_link
-from .warp import WarpSettings
 from .models import (
     CRISIS_PORTS,
     RISKY_TARGET_SUFFIXES,
@@ -31,6 +30,7 @@ from .models import (
     is_ip,
     validate_host,
 )
+from .warp import WarpSettings
 
 STATE_VERSION = 1
 _STATS_UNSET = object()

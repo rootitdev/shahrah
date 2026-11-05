@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .warp import WarpSettings
 
 from .models import Listener, Profile, ServerSettings, Tuning, User
 
@@ -126,7 +129,7 @@ def render_server_config(
     users: Sequence[User],
     *,
     log_level: str = "warning",
-    warp: "WarpSettings | None" = None,
+    warp: WarpSettings | None = None,
 ) -> dict[str, Any]:
     """Return the full Xray server config as a JSON-serialisable dict."""
     labels = [user.label for user in users]
@@ -197,7 +200,8 @@ def render_server_config(
     if warp is not None:
         from .warp import xray_outbound, xray_routing_rules
 
-        config["outbounds"].insert(0, xray_outbound(warp))
+        # Append — Xray's first outbound is the default; warp must never be default.
+        config["outbounds"].append(xray_outbound(warp))
         warp_rules = xray_routing_rules(warp)
         if warp.route_all:
             # After private/bittorrent blocks so LAN SSRF stays closed.

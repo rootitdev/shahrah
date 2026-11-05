@@ -61,6 +61,8 @@ def test_parse_wgcf_profile_and_wg_quick() -> None:
     assert settings.address_v6.startswith("2606:")
     conf = wg_quick_conf(settings)
     assert "Table = off" in conf
+    assert not any(line.startswith("DNS") for line in conf.splitlines())
+    assert "MTU = 1280" in conf
     assert settings.private_key in conf
 
 
@@ -77,8 +79,7 @@ def test_xray_outbound_and_google_routing() -> None:
         "domain:googlevideo.com",
     ):
         assert needle in domains
-    assert any("play.google.com" in d for d in domains)
-    assert any("gemini.google.com" in d for d in domains)
+    assert "domain:google.com" in domains  # covers play./gemini. subdomains
     all_rules = xray_routing_rules(replace(settings, route_all=True))
     assert all_rules[0]["outboundTag"] == "warp" and "network" in all_rules[0]
 
@@ -103,6 +104,9 @@ def test_hy2_render_puts_google_acl_ahead_of_rejects() -> None:
     )
     assert "bindDevice: warp" in text
     assert text.index("warp(suffix:google.com)") < text.index("reject(10.0.0.0/8)")
+    assert "direct(all)" in text
+    assert text.index("direct(all)") > text.index("reject(10.0.0.0/8)")
+    assert text.index("direct(all)") < text.index("outbounds:")
     text_all = hy.render_server(
         hy.Hy2Settings(obfs_password=OBFS, pin_sha256="a" * 64, sni="example.com"),
         [USER],
@@ -131,7 +135,8 @@ def test_cli_warp_enable_then_apply(tmp_path: Path, capsys: pytest.CaptureFixtur
 
     cfg = render_server_config(node.server_settings(), list(node.users), warp=node.warp)
     tags = [o["tag"] for o in cfg["outbounds"]]
-    assert tags[0] == "warp"
+    assert tags[0] == "direct"  # Xray default outbound
+    assert "warp" in tags and tags.index("direct") < tags.index("warp")
     domain_rules = [r for r in cfg["routing"]["rules"] if r.get("outboundTag") == "warp"]
     assert domain_rules and "domain:google.com" in domain_rules[0]["domain"]
 
@@ -155,3 +160,22 @@ def test_cli_warp_enable_then_apply(tmp_path: Path, capsys: pytest.CaptureFixtur
 def test_invalid_profile_rejected(tmp_path: Path) -> None:
     with pytest.raises(ConfigError):
         parse_wgcf_profile("[Interface]\nPrivateKey = nope\n")
+
+
+def test_ipv4_only_pins_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    import socket
+
+    from shahrah.warp import ipv4_only
+
+    settings = parse_wgcf_profile(_profile_text())
+    assert any(c.isalpha() for c in settings.endpoint.rsplit(":", 1)[0])
+
+    def fake_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+        assert family == socket.AF_INET
+        return [(None, None, None, None, ("203.0.113.9", port))]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    pinned = ipv4_only(settings)
+    assert pinned.address_v6 == ""
+    assert pinned.endpoint == "203.0.113.9:2408"
+
