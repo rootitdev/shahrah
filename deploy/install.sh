@@ -357,6 +357,10 @@ install_waterwall() {
 install_relay() {
   [[ -n "$WW_PEER" ]] || die "relay role needs --ww-peer IP (the exit)"
   [[ "$FIREWALL" -eq 0 ]] || { detect_ssh_port; ufw allow "${SSH_PORT}/tcp" >/dev/null; ufw --force enable >/dev/null; }
+  # Same BBR / tcp_mtu_probing as the exit: IRAN->EXIT often has MTU 1400 overlays; without
+  # probing, large TLS records (feed images, 2 MB probes) black-hole after the handshake.
+  shahrah print sysctl > /etc/sysctl.d/99-shahrah.conf
+  sysctl --system >/dev/null || true
   install_waterwall
   # Optional crisis path on the Iran box itself (same paqet key as the exit, or its own).
   [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
