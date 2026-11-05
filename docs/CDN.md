@@ -65,3 +65,19 @@ loopback (client dials, tunnel never carries data). Prefer:
 Do not ship port-80 REALITY+XHTTP as a default crisis path until upstream XHTTP+REALITY on
 non-443 is proven. ``install.sh --multi-port`` therefore adds only ``53:reality-xhttp``
 (not 80).
+
+## Port 80 / CF HTTP family (2052, 8080, 8880)
+
+REALITY must not listen on TCP 80. The CDN origin speaks **plain XHTTP** on an internal
+port (default ``8080``, ufw-deny from the world). Caddy (or another reverse proxy) publishes:
+
+* ``:2053`` HTTPS to Cloudflare (client TLS to the edge)
+* ``:2052`` HTTP to Cloudflare (CF Flexible / HTTP origins)
+
+Both ``2052`` and ``2053`` must be firewalled to **Cloudflare IP ranges only**
+(``install.sh`` / ``shahrah-cf-allowlist``). Direct hits from Iran on those ports should time out.
+
+Xray 26+ clients refuse VLESS with ``security=none`` toward a public edge; phone apps that
+use sing-box may still import an HTTP ``:2052`` / ``:80`` link. Prefer the TLS ``:2053`` link
+for Xray-core clients.
+

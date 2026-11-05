@@ -331,6 +331,48 @@ install_hysteria2() {
 }
 
 
+
+# CDN origin ports (2052/2053) must only accept Cloudflare. Ranges are fetched at
+# install time from https://www.cloudflare.com/ips-v4 (not vendored in git).
+install_cf_origin_allowlist() {
+  local pin="$CONF_DIR/cloudflare-ips-v4.txt" tmp cidr
+  [[ "$FIREWALL" -eq 1 ]] || return 0
+  command -v ufw >/dev/null || return 0
+  tmp="$(mktemp)"
+  if ! curl -fsSL --retry 3 --max-time 30 -o "$tmp" https://www.cloudflare.com/ips-v4; then
+    log "WARN: could not fetch Cloudflare IP list; leave 2052/2053 closed to the world"
+    rm -f "$tmp"
+    ufw deny 2052/tcp >/dev/null || true
+    ufw deny 2053/tcp >/dev/null || true
+    ufw deny 8080/tcp >/dev/null || true
+    return 0
+  fi
+  grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' "$tmp" > "$pin"
+  rm -f "$tmp"
+  chmod 0644 "$pin"
+  while read -r cidr; do
+    [[ -n "$cidr" ]] || continue
+    ufw allow from "$cidr" to any port 2052 proto tcp >/dev/null || true
+    ufw allow from "$cidr" to any port 2053 proto tcp >/dev/null || true
+  done < "$pin"
+  ufw deny 2052/tcp >/dev/null || true
+  ufw deny 2053/tcp >/dev/null || true
+  ufw deny 8080/tcp >/dev/null || true
+  cat > /usr/local/sbin/shahrah-cf-allowlist <<'SCRIPT'
+#!/bin/bash
+set -euo pipefail
+PIN=/etc/shahrah/cloudflare-ips-v4.txt
+TMP=$(mktemp)
+curl -fsSL --max-time 30 https://www.cloudflare.com/ips-v4 -o "$TMP"
+grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' "$TMP" > "$PIN"
+rm -f "$TMP"
+echo "pinned $(wc -l < "$PIN") Cloudflare IPv4 prefixes in $PIN"
+SCRIPT
+  chmod 0755 /usr/local/sbin/shahrah-cf-allowlist
+  log "CDN origin ports 2052/2053 limited to Cloudflare IPv4 ranges ($pin)"
+}
+
+
 install_warp() {
   local arch expected actual dir route_args=()
   arch="$(arch_suffix)"
@@ -625,6 +667,7 @@ main() {
   setup_firewall
   [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
   [[ "$WITH_HY2" -eq 0 ]] || install_hysteria2
+  install_cf_origin_allowlist
   [[ "$WITH_WARP" -eq 0 ]] || install_warp
   [[ -z "$WW_SIDE" ]] || install_waterwall
 
