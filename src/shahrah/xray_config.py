@@ -103,6 +103,17 @@ def _stream_settings(server: ServerSettings, listener: Listener) -> dict[str, An
             "xhttpSettings": {"path": listener.xhttp_path, "mode": listener.xhttp_mode},
             "sockopt": _sockopt(server.tuning),
         }
+    if listener.profile is Profile.PLAIN_WS:
+        host = listener.ws_host or listener.cdn_host or ""
+        ws: dict[str, Any] = {"path": listener.ws_path}
+        if host:
+            ws["host"] = host
+        return {
+            "network": "ws",
+            "security": "none",
+            "wsSettings": ws,
+            "sockopt": _sockopt(server.tuning),
+        }
     reality = server.reality
     stream: dict[str, Any] = {
         "network": "raw" if listener.profile is Profile.REALITY_VISION else "xhttp",
@@ -130,6 +141,7 @@ def render_server_config(
     *,
     log_level: str = "warning",
     warp: WarpSettings | None = None,
+    ss2022: object | None = None,
 ) -> dict[str, Any]:
     """Return the full Xray server config as a JSON-serialisable dict."""
     labels = [user.label for user in users]
@@ -179,7 +191,15 @@ def render_server_config(
         "policy": {"levels": {"0": _policy_level(server.tuning)}},
     }
 
+    if ss2022 is not None:
+        from .shadowsocks import Ss2022Settings
+        from .shadowsocks import xray_inbound as ss_inbound
+
+        if not isinstance(ss2022, Ss2022Settings):
+            raise TypeError("ss2022 must be Ss2022Settings")
+        inbounds.append(ss_inbound(ss2022, list(users)))
     if server.stats_api_port is not None:
+
         inbounds.append(
             {
                 "tag": _API_INBOUND_TAG,

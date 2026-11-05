@@ -93,7 +93,11 @@ def _build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--config-out", type=Path, default=DEFAULT_XRAY_CONFIG)
     apply.add_argument("--xray-bin", default="xray", help="binary used for `run -test`")
     apply.add_argument("--no-validate", action="store_true")
-    apply.add_argument("--group", help="group allowed to read the config (the service user)")
+    apply.add_argument(
+        "--group",
+        default=os.environ.get("SHAHRAH_CONFIG_GROUP", ""),
+        help="group allowed to read the config (SHAHRAH_CONFIG_GROUP or --group; often 'shahrah')",
+    )
 
     user = sub.add_parser("user", help="manage VPN users")
     user_sub = user.add_subparsers(dest="user_command", required=True)
@@ -379,6 +383,30 @@ def _build_parser() -> argparse.ArgumentParser:
     b_merge = bsub.add_parser("merge", help="fold vantage SNI reports into the bank")
     b_merge.add_argument("reports", nargs="+", type=Path)
 
+    pscout = sub.add_parser(
+        "port-scout",
+        help="scored TCP/UDP port bank (seed/refresh/list/pick/assign)",
+    )
+    pscout.add_argument("--bank", type=Path, default=None)
+    pscout.add_argument("--ttl-hours", type=float, default=12.0)
+    ps = pscout.add_subparsers(dest="port_command", required=True)
+    ps_seed = ps.add_parser("seed", help="add built-in high-port candidates")
+    ps_seed.add_argument("--target", required=True, help="EXIT IP/host to probe from this vantage")
+    ps_ref = ps.add_parser("refresh", help="probe candidates against --target")
+    ps_ref.add_argument("--all", action="store_true")
+    ps_ref.add_argument("--timeout", type=float, default=3.0)
+    ps_ref.add_argument("--vantage", default="local")
+    ps_ref.add_argument("--asn", type=int)
+    ps_list = ps.add_parser("list", help="score ports, best first")
+    ps_list.add_argument("--proto", choices=["tcp", "udp"])
+    ps_list.add_argument("--json", action="store_true")
+    ps_pick = ps.add_parser("pick", help="print the best usable unassigned port")
+    ps_pick.add_argument("--proto", choices=["tcp", "udp"], default="tcp")
+    ps_asg = ps.add_parser("assign", help="reserve a port for a user/group label")
+    ps_asg.add_argument("port", type=int)
+    ps_asg.add_argument("label")
+    ps_asg.add_argument("--proto", choices=["tcp", "udp"], default="tcp")
+
     retarget = sub.add_parser(
         "retarget", help="change the REALITY target / SNI (then apply + restart)"
     )
@@ -514,6 +542,16 @@ def _build_parser() -> argparse.ArgumentParser:
     pq.add_argument("--unit-role", choices=["server", "client"], default="server")
     pq.add_argument("--config-path", default="/etc/shahrah/paqet.yaml")
     pq.add_argument("--out", type=Path, help="write the config here (mode 0600)")
+
+    ss2 = sub.add_parser(
+        "ss2022",
+        help="Shadowsocks-2022 (blake3-aes-128-gcm) on a scouted high port",
+    )
+    ss2_sub = ss2.add_subparsers(dest="ss_action", required=True)
+    ss2_en = ss2_sub.add_parser("enable", help="enable SS2022 on PORT for current users")
+    ss2_en.add_argument("--port", type=int, required=True)
+    ss2_sub.add_parser("disable")
+    ss2_sub.add_parser("show")
 
     hy = sub.add_parser(
         "hysteria2",
@@ -678,8 +716,12 @@ def _validate_with_xray(xray_bin: str, config_text: str) -> None:
 def _write_service_config(path: Path, text: str, group: str | None) -> None:
     write_private_file(path, text)
     if group:
-        shutil.chown(path, group=group)
-        path.chmod(0o640)
+        try:
+            shutil.chown(path, group=group)
+            path.chmod(0o640)
+        except LookupError:
+            # Group missing on this host (dev/tests); leave owner-only 0600.
+            pass
 
 
 def _parse_listener(spec: str) -> Listener:
@@ -693,6 +735,14 @@ def _parse_listener(spec: str) -> Listener:
     profile_text, _, cdn_text = rest.partition(":")
     try:
         profile = Profile(profile_text)
+        if profile is Profile.PLAIN_WS:
+            host, _, path = cdn_text.partition(":")
+            return Listener(
+                int(port_text),
+                profile,
+                ws_path=(path or "/shahrah-ws"),
+                ws_host=host or "",
+            )
         if profile is not Profile.CDN_XHTTP:
             if cdn_text:
                 raise ConfigError(f"unexpected extra fields for {profile_text}: {cdn_text!r}")
@@ -1519,7 +1569,8 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "sni-bank":
         return _sni_bank(args, out)
-
+    if args.command == "port-scout":
+        return _port_scout(args, out)
     if args.command == "sni-scout":
         results = sni_scout.scout(
             args.hosts,
@@ -1676,6 +1727,8 @@ def _run(args: argparse.Namespace) -> int:
         return _run_hysteria2(args, state_path, state, out)
     if args.command == "warp":
         return _run_warp(args, state_path, state, out)
+    if args.command == "ss2022":
+        return _run_ss2022(args, state_path, state, out)
 
     if args.command == "tuning-profile":
         if args.name:
@@ -1688,11 +1741,16 @@ def _run(args: argparse.Namespace) -> int:
         if not state.users:
             raise ConfigError("no users yet: run `shahrah user add <label>` first")
         text = dumps(
-            render_server_config(state.server_settings(), list(state.users), warp=state.warp)
+            render_server_config(
+                state.server_settings(),
+                list(state.users),
+                warp=state.warp,
+                ss2022=state.ss2022,
+            )
         )
         if not args.no_validate:
             _validate_with_xray(args.xray_bin, text)
-        _write_service_config(args.config_out, text, args.group)
+        _write_service_config(args.config_out, text, args.group or None)
         out.write(f"wrote {args.config_out} ({len(state.users)} users)\n")
         return 0
 
@@ -1725,10 +1783,16 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "link":
         for endpoint in sorted(endpoints, key=lambda e: e.priority):
             out.write(vless_link(endpoint, user_obj) + "\n")
-        for extra in state.hysteria2_links(user_obj, args.name):
+        for extra in (
+            *state.hysteria2_links(user_obj, args.name),
+            *state.ss2022_links(user_obj, args.name),
+        ):
             out.write(extra + "\n")
     elif args.command == "sub":
-        extra_links = state.hysteria2_links(user_obj, args.name)
+        extra_links = [
+            *state.hysteria2_links(user_obj, args.name),
+            *state.ss2022_links(user_obj, args.name),
+        ]
         out.write(build_subscription(endpoints, user_obj, extra_links=extra_links) + "\n")
     return 0
 
@@ -1829,3 +1893,105 @@ def _sni_bank(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"merged {len(args.reports)} report(s)\n")
         return 0
     raise ConfigError(f"unknown sni-bank command {cmd!r}")
+
+
+def _port_scout(args: argparse.Namespace, out: TextIO) -> int:
+    from . import port_scout as ps
+
+    path = args.bank or Path(args.state).with_name("port-bank.json")
+    ttl = args.ttl_hours * 3600
+    now = time.time()
+    bank = ps.load_bank(path)
+    cmd = args.port_command
+    if cmd == "seed":
+        bank = ps.seed(ps.PortBank(target_host=args.target))
+        ps.save_bank(path, bank)
+        out.write(f"{len(bank.candidates)} candidates -> {path} (target {bank.target_host})\n")
+        return 0
+    if cmd == "refresh":
+        if not bank.target_host:
+            raise ConfigError("port-scout seed --target HOST first")
+        bank = ps.refresh(
+            bank,
+            now,
+            only_due=not args.all,
+            ttl_s=ttl,
+            timeout_s=args.timeout,
+            vantage=args.vantage,
+            asn=args.asn,
+        )
+        ps.save_bank(path, bank)
+        cmd = "list"
+    if cmd == "list":
+        rows = bank.ranked(now, proto=getattr(args, "proto", None), ttl_s=ttl)
+        if getattr(args, "json", False):
+            out.write(
+                json.dumps(
+                    [
+                        {
+                            "port": s.port,
+                            "proto": s.proto,
+                            "score": s.total,
+                            "usable": s.usable,
+                            "factors": dict(s.factors),
+                            "reasons": list(s.reasons),
+                        }
+                        for s in rows
+                    ],
+                    indent=2,
+                )
+                + "\n"
+            )
+        else:
+            for s in rows[:40]:
+                flag = "ok " if s.usable else ("EXP" if s.expired else "NO ")
+                out.write(f"{flag} {s.total:5.1f}  {s.proto}/{s.port}\n")
+        return 0 if any(s.usable for s in rows) else 1
+    if cmd == "pick":
+        cand = ps.pick(bank, now, proto=args.proto)
+        if cand is None:
+            out.write("no usable port\n")
+            return 1
+        out.write(f"{cand.proto}/{cand.port}\n")
+        return 0
+    if cmd == "assign":
+        bank = ps.assign(bank, args.port, args.proto, args.label)
+        ps.save_bank(path, bank)
+        out.write(f"assigned {args.proto}/{args.port} -> {args.label}\n")
+        return 0
+    raise ConfigError(f"unknown port-scout command {cmd!r}")
+
+def _run_ss2022(args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO) -> int:
+    from . import shadowsocks as ss
+
+    if args.ss_action == "enable":
+        users = list(state.users)
+        if not users:
+            raise ConfigError("add users before enabling ss2022")
+        existing = state.ss2022
+        server_pw = existing.server_password if existing else ss.generate_server_password()
+        user_pws = dict(existing.user_passwords) if existing else {}
+        for u in users:
+            user_pws.setdefault(u.label, ss.generate_user_password())
+        settings = ss.Ss2022Settings(
+            port=args.port,
+            server_password=server_pw,
+            user_passwords=user_pws,
+        )
+        save_state(state_path, state.with_ss2022(settings))
+        out.write(
+            f"ss2022 enabled on {args.port}; next: shahrah apply && open ufw {args.port}/tcp\n"
+        )
+        return 0
+    if args.ss_action == "disable":
+        save_state(state_path, state.with_ss2022(None))
+        out.write("ss2022 disabled\n")
+        return 0
+    if args.ss_action == "show":
+        if state.ss2022 is None:
+            out.write("ss2022 disabled\n")
+            return 1
+        users = sorted(state.ss2022.user_passwords)
+        out.write(f"port={state.ss2022.port} method={ss.METHOD} users={users}\n")
+        return 0
+    raise ConfigError(f"unknown ss2022 action {args.ss_action!r}")

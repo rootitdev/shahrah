@@ -25,6 +25,8 @@ class Profile(StrEnum):
     # VLESS over plain XHTTP behind a CDN / TLS reverse proxy that terminates TLS: the crisis
     # layer, reachable through a CDN edge when direct server IPs are blocked.
     CDN_XHTTP = "cdn-xhttp"
+    # VLESS + WebSocket, no TLS — for :80 / CF HTTP edges with a domain address.
+    PLAIN_WS = "plain-ws"
 
 
 XHTTP_MODES = frozenset({"auto", "packet-up", "stream-up", "stream-one"})
@@ -215,10 +217,13 @@ class Listener:
     cdn_host: str = ""
     edge_tls: bool = True
     edge_port: int = 0  # 0 = 443 (TLS) or 80 (plain); CF-compatible alt e.g. 2053
+    ws_path: str = "/shahrah-ws"
+    ws_host: str = ""  # Host header; defaults to public host / cdn_host
 
     def __post_init__(self) -> None:
         validate_port(self.port)
-        _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is not Profile.PLAIN_WS:
+            _validate_xhttp(self.xhttp_path, self.xhttp_mode)
         if self.profile is Profile.REALITY_XHTTP and self.xhttp_path == "/":
             raise ConfigError(
                 "xhttp_path '/' collides with the REALITY/cover site root and stalls the "
@@ -240,6 +245,15 @@ class Listener:
                 )
             if self.edge_port:
                 validate_port(self.edge_port, "cdn edge port")
+        elif self.profile is Profile.PLAIN_WS:
+            if not self.ws_path.startswith("/"):
+                raise ConfigError(f"ws_path must start with '/': {self.ws_path!r}")
+            if len(self.ws_path) < 6:
+                raise ConfigError("ws_path must be unguessable (at least 6 characters)")
+            if self.ws_host:
+                validate_host(self.ws_host, "ws host")
+            if self.cdn_host:
+                raise ConfigError("cdn_host is only valid for cdn-xhttp listeners")
         elif self.cdn_host:
             raise ConfigError("cdn_host is only valid for cdn-xhttp listeners")
         elif self.edge_port:
@@ -270,7 +284,8 @@ class ServerSettings:
 
     def __post_init__(self) -> None:
         validate_port(self.port)
-        _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is not Profile.PLAIN_WS:
+            _validate_xhttp(self.xhttp_path, self.xhttp_mode)
         if self.profile is Profile.REALITY_XHTTP and self.xhttp_path == "/":
             raise ConfigError(
                 "xhttp_path '/' collides with the REALITY cover site root and stalls the "
@@ -347,6 +362,12 @@ class Endpoint:
         validate_host(self.host, "endpoint host")
         validate_port(self.port, "endpoint port")
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is Profile.PLAIN_WS:
+            if self.public_key or self.short_id:
+                raise ConfigError("a plain-ws endpoint has no REALITY key or short id")
+            if not self.xhttp_path.startswith("/"):
+                raise ConfigError("plain-ws path must start with /")
+            return
         if self.profile is Profile.CDN_XHTTP:
             if self.public_key or self.short_id:
                 raise ConfigError("a cdn-xhttp endpoint has no REALITY key or short id")

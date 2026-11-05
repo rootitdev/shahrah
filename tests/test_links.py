@@ -69,3 +69,26 @@ def test_subscription_rejects_unknown_or_duplicate(endpoint: Endpoint, users: li
 
 def test_encode_subscription_is_plain_base64() -> None:
     assert base64.b64decode(encode_subscription(["a", "b"])) == b"a\nb\n"
+
+
+def test_plain_ws_link_uses_domain_and_host_header() -> None:
+    from shahrah.models import Endpoint, Profile, User
+    from shahrah.links import vless_link
+
+    ep = Endpoint(
+        name="main-ws-80",
+        host="static.jetengine.ir",
+        port=80,
+        profile=Profile.PLAIN_WS,
+        sni="static.jetengine.ir",
+        tls=False,
+        xhttp_path="/shahrah-ws-abc123",
+        xhttp_mode="stream-one",
+    )
+    user = User(label="alice", uuid="11111111-1111-1111-1111-111111111111")
+    link = vless_link(ep, user)
+    assert "type=ws" in link
+    assert "security=none" in link
+    assert "static.jetengine.ir:80" in link
+    assert "host=static.jetengine.ir" in link
+    assert "shahrah-ws-abc123" in link

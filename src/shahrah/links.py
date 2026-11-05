@@ -37,10 +37,27 @@ def _cdn_link(endpoint: Endpoint, user: User) -> str:
     return f"vless://{authority}?{params}#{quote(endpoint.name, safe='')}"
 
 
+def _ws_link(endpoint: Endpoint, user: User) -> str:
+    """Plain VLESS+WS (no TLS). Address must be a domain for stock Xray 26+."""
+    query: list[tuple[str, str]] = [
+        ("encryption", "none"),
+        ("security", "none"),
+        ("type", "ws"),
+        ("path", endpoint.xhttp_path),
+    ]
+    if endpoint.sni:
+        query.append(("host", endpoint.sni))
+    authority = f"{user.uuid}@{_format_host(endpoint.host)}:{endpoint.port}"
+    params = urlencode(query, quote_via=quote)
+    return f"vless://{authority}?{params}#{quote(endpoint.name, safe='')}"
+
+
 def vless_link(endpoint: Endpoint, user: User) -> str:
     """Return a ``vless://`` share link for ``user`` on ``endpoint``."""
     if endpoint.profile is Profile.CDN_XHTTP:
         return _cdn_link(endpoint, user)
+    if endpoint.profile is Profile.PLAIN_WS:
+        return _ws_link(endpoint, user)
     query: list[tuple[str, str]] = [
         ("encryption", "none"),
         ("security", "reality"),

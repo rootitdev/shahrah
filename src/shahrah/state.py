@@ -30,6 +30,7 @@ from .models import (
     is_ip,
     validate_host,
 )
+from .shadowsocks import Ss2022Settings
 from .warp import WarpSettings
 
 STATE_VERSION = 1
@@ -45,6 +46,18 @@ def _migrate_xhttp_path(path: str, profile: Profile) -> str:
 
 def _listener_from_state(data: dict) -> Listener:
     profile = Profile(data["profile"])
+    if profile is Profile.PLAIN_WS:
+        return Listener(
+            data["port"],
+            profile,
+            data.get("xhttp_path", "/shahrah"),
+            data.get("xhttp_mode", "stream-one"),
+            data.get("cdn_host", ""),
+            data.get("edge_tls", True),
+            data.get("edge_port", 0),
+            data.get("ws_path", "/shahrah-ws"),
+            data.get("ws_host", ""),
+        )
     return Listener(
         data["port"],
         profile,
@@ -53,6 +66,8 @@ def _listener_from_state(data: dict) -> Listener:
         data.get("cdn_host", ""),
         data.get("edge_tls", True),
         data.get("edge_port", 0),
+        data.get("ws_path", "/shahrah-ws"),
+        data.get("ws_host", ""),
     )
 
 
@@ -78,6 +93,7 @@ class NodeState:
     extra_listeners: tuple[Listener, ...] = ()
     hysteria2: Hy2Settings | None = None  # optional QUIC/UDP social path
     warp: WarpSettings | None = None  # optional Cloudflare WARP egress for Google
+    ss2022: Ss2022Settings | None = None
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
@@ -151,6 +167,9 @@ class NodeState:
         """Enable or disable the Xray access log (required for SNI watch)."""
         return replace(self, access_log=path)
 
+    def with_ss2022(self, settings: Ss2022Settings | None) -> NodeState:
+        return replace(self, ss2022=settings)
+
     def with_warp(self, settings: WarpSettings | None) -> NodeState:
         """Attach or clear Cloudflare WARP egress (Google-family / route-all)."""
         return replace(self, warp=settings)
@@ -158,6 +177,14 @@ class NodeState:
     def with_hysteria2(self, settings: Hy2Settings | None) -> NodeState:
         """Enable (or with ``None`` disable) the Hysteria2 UDP path."""
         return replace(self, hysteria2=settings)
+
+    def ss2022_links(self, user: User, prefix: str = "main") -> list[str]:
+        if self.ss2022 is None:
+            return []
+        from .shadowsocks import share_link as ss_link
+
+        name = f"{prefix}-ss2022-{self.ss2022.port}"
+        return [ss_link(self.ss2022, self.public_host, user, name)]
 
     def hysteria2_links(self, user: User, prefix: str = "main") -> list[str]:
         """``hysteria2://`` links for ``user`` (empty when the path is disabled)."""
@@ -177,23 +204,41 @@ class NodeState:
         mainstream port first and keep the others as fall-overs.
         """
         crisis_rank = {port: rank for rank, port in enumerate(CRISIS_PORTS)}
-        return [
-            self._cdn_endpoint(prefix, listener, len(CRISIS_PORTS))
-            if listener.profile is Profile.CDN_XHTTP
-            else Endpoint(
-                name=f"{prefix}-{listener.port}",
-                host=self.public_host,
-                port=listener.port,
-                profile=listener.profile,
-                public_key=self.public_key,
-                short_id=self.short_ids[0],
-                sni=self.target_host,
-                xhttp_path=listener.xhttp_path,
-                xhttp_mode=listener.xhttp_mode,
-                priority=crisis_rank.get(listener.port, len(CRISIS_PORTS)),
-            )
-            for listener in self.server_settings().listeners()
-        ]
+        out: list[Endpoint] = []
+        for listener in self.server_settings().listeners():
+            if listener.profile is Profile.CDN_XHTTP:
+                out.append(self._cdn_endpoint(prefix, listener, len(CRISIS_PORTS)))
+            elif listener.profile is Profile.PLAIN_WS:
+                host = listener.ws_host or self.public_host
+                out.append(
+                    Endpoint(
+                        name=f"{prefix}-ws-{listener.port}",
+                        host=host,
+                        port=listener.port,
+                        profile=listener.profile,
+                        sni=listener.ws_host or host,
+                        tls=False,
+                        xhttp_path=listener.ws_path,
+                        xhttp_mode="stream-one",
+                        priority=crisis_rank.get(listener.port, len(CRISIS_PORTS)),
+                    )
+                )
+            else:
+                out.append(
+                    Endpoint(
+                        name=f"{prefix}-{listener.port}",
+                        host=self.public_host,
+                        port=listener.port,
+                        profile=listener.profile,
+                        public_key=self.public_key,
+                        short_id=self.short_ids[0],
+                        sni=self.target_host,
+                        xhttp_path=listener.xhttp_path,
+                        xhttp_mode=listener.xhttp_mode,
+                        priority=crisis_rank.get(listener.port, len(CRISIS_PORTS)),
+                    )
+                )
+        return out
 
     @staticmethod
     def _cdn_endpoint(prefix: str, listener: Listener, priority: int) -> Endpoint:
@@ -299,6 +344,8 @@ class NodeState:
                     "cdn_host": item.cdn_host,
                     "edge_tls": item.edge_tls,
                     "edge_port": item.edge_port,
+                    "ws_path": item.ws_path,
+                    "ws_host": item.ws_host,
                 }
                 for item in self.extra_listeners
             ],
@@ -307,6 +354,8 @@ class NodeState:
             data["hysteria2"] = self.hysteria2.to_dict()
         if self.warp is not None:
             data["warp"] = self.warp.to_dict()
+        if self.ss2022 is not None:
+            data["ss2022"] = self.ss2022.to_dict()
         return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
     @classmethod
@@ -336,6 +385,7 @@ class NodeState:
                 if data.get("hysteria2")
                 else None,
                 warp=WarpSettings.from_dict(data["warp"]) if data.get("warp") else None,
+                ss2022=Ss2022Settings.from_dict(data["ss2022"]) if data.get("ss2022") else None,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             if isinstance(exc, ConfigError):
