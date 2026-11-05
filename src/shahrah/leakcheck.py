@@ -134,3 +134,37 @@ def check_client_template(config: dict[str, Any]) -> LeakCheckReport:
                 "" if loop_ok else f"listen={listen!r}",
             )
     return report
+
+
+def check_server_config(config: dict[str, Any]) -> LeakCheckReport:
+    """Server-side leak/SSRF invariants for a rendered Xray config."""
+    report = LeakCheckReport(ok=True)
+    outs = config.get("outbounds") or []
+    tags = [o.get("tag") for o in outs if isinstance(o, dict)]
+    if tags:
+        _add(
+            report,
+            "default_outbound_not_warp",
+            tags[0] != "warp",
+            "" if tags[0] != "warp" else "warp must not be the first/default outbound",
+        )
+        if "direct" in tags and "warp" in tags:
+            _add(
+                report,
+                "direct_before_warp",
+                tags.index("direct") < tags.index("warp"),
+                "",
+            )
+    rules = (config.get("routing") or {}).get("rules") or []
+    private_blocked = any(
+        isinstance(r, dict)
+        and r.get("outboundTag") in {"block", "BLOCK"}
+        and any(
+            str(ip).startswith("10.") or str(ip).startswith("127.")
+            for ip in (r.get("ip") or [])
+        )
+        for r in rules
+    )
+    _add(report, "private_ranges_blocked", private_blocked, "")
+    return report
+

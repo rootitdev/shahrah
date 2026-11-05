@@ -18,3 +18,17 @@ def test_broken_dns_fails() -> None:
     report = leakcheck.check_client_template(cfg)
     assert not report.ok
     assert any(c["name"] == "dns_doh_only" and not c["ok"] for c in report.checks)
+
+def test_server_config_rejects_warp_as_default() -> None:
+    bad = {"outbounds": [{"tag": "warp"}, {"tag": "direct"}], "routing": {"rules": []}}
+    rep = leakcheck.check_server_config(bad)
+    assert not rep.ok
+    names = {c["name"]: c["ok"] for c in rep.checks}
+    assert names["default_outbound_not_warp"] is False
+
+    good = {
+        "outbounds": [{"tag": "direct"}, {"tag": "block"}, {"tag": "warp"}],
+        "routing": {"rules": [{"type": "field", "ip": ["10.0.0.0/8"], "outboundTag": "block"}]},
+    }
+    rep2 = leakcheck.check_server_config(good)
+    assert rep2.ok
