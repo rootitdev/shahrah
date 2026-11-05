@@ -31,6 +31,11 @@ WW_VERSION="v1.5.2"
 WW_SHA256_X64="1d9ba7da4a3ab42b5685e5ecf03cf3d93a97ede5fd9fce8a12dbfc23e04a829a"
 WW_SHA256_ARM64="56486a3a8d02a67f782d45a6155bea4e437348c72611a3f685459d97966ff96b"
 
+# wgcf (MIT, https://github.com/ViRb3/wgcf) — WARP account + WireGuard profile for --with-warp.
+WGCF_VERSION="2.2.29"
+WGCF_SHA256_AMD64="572d102720ee39a6a0a6a22a0b4689fdf92b8974ede927111e3daf8d2ed5dec1"
+WGCF_SHA256_ARM64="6228ae03ce2004edb24888aa119d7bd3978004964113f9f1e00841db1b01313c"
+
 APP_DIR="/opt/shahrah"
 CONF_DIR="/etc/shahrah"
 SERVICE_USER="shahrah"
@@ -49,6 +54,8 @@ WITH_PAQET=0
 PAQET_PORT="9999"
 WITH_HY2=0
 HY2_PORT="8443"
+WITH_WARP=0
+WARP_ROUTE_ALL=0
 HY2_HOP=""
 WW_SIDE=""
 WW_PEER=""
@@ -111,6 +118,8 @@ parse_args() {
       --with-paqet) WITH_PAQET=1; PAQET_PORT="${2:?--with-paqet needs a PORT}"; shift 2 ;;
       --with-hysteria2) WITH_HY2=1; HY2_PORT="${2:?--with-hysteria2 needs a PORT}"; shift 2 ;;
       --hy2-hop) HY2_HOP="${2:?--hy2-hop needs LOW-HIGH}"; shift 2 ;;
+      --with-warp) WITH_WARP=1; shift ;;
+      --warp-route-all) WARP_ROUTE_ALL=1; shift ;;
       --with-waterwall) WW_SIDE="${2:?--with-waterwall needs iran or exit}"; shift 2 ;;
       --ww-peer) WW_PEER="${2:?--ww-peer needs an IP}"; shift 2 ;;
       --ww-self) WW_SELF="${2:?--ww-self needs an IP}"; shift 2 ;;
@@ -146,7 +155,11 @@ install_packages() {
   log "installing system packages"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
-  apt-get install -y -qq python3 python3-venv unzip curl ca-certificates ufw >/dev/null
+  local pkgs=(python3 python3-venv unzip curl ca-certificates ufw)
+  if [[ "$WITH_WARP" -eq 1 ]]; then
+    pkgs+=(wireguard-tools)
+  fi
+  apt-get install -y -qq "${pkgs[@]}" >/dev/null
   if ! python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
     # Ubuntu 22.04 ships 3.10 as the default; 3.11 is available as a parallel package.
     log "default $(python3 -V) is too old; installing python3.11"
@@ -314,6 +327,51 @@ install_hysteria2() {
   systemctl restart shahrah-hysteria2
   log "hysteria2 on udp/${HY2_PORT}${HY2_HOP:+ (hop ${HY2_HOP})}; links now include hysteria2://"
   log "  after user changes: shahrah hysteria2 server --out $CONF_DIR/hysteria2.yaml && systemctl restart shahrah-hysteria2"
+}
+
+
+install_warp() {
+  local arch expected actual dir route_args=()
+  arch="$(arch_suffix)"
+  [[ "$arch" == amd64 ]] && expected="$WGCF_SHA256_AMD64" || expected="$WGCF_SHA256_ARM64"
+  dir="$(mktemp -d)"
+  log "downloading wgcf v${WGCF_VERSION}"
+  curl -fsSL --retry 3 -o "$dir/wgcf" \
+    "https://github.com/ViRb3/wgcf/releases/download/v${WGCF_VERSION}/wgcf_${WGCF_VERSION}_linux_${arch}"
+  actual="$(sha256sum "$dir/wgcf" | awk '{print $1}')"
+  [[ "$actual" == "$expected" ]] || die "checksum mismatch for wgcf (expected $expected, got $actual)"
+  install -m 0755 "$dir/wgcf" /usr/local/bin/wgcf
+  rm -rf "$dir"
+
+  # Register a free WARP account once; keep the profile on the box (never in git).
+  if [[ ! -s "$CONF_DIR/wgcf-account.toml" ]]; then
+    log "registering Cloudflare WARP account via wgcf"
+    (cd "$CONF_DIR" && wgcf register --accept-tos >/dev/null)
+  fi
+  if [[ ! -s "$CONF_DIR/wgcf-profile.conf" ]]; then
+    (cd "$CONF_DIR" && wgcf generate -p "$CONF_DIR/wgcf-profile.conf" >/dev/null) \
+      || (cd "$CONF_DIR" && wgcf generate >/dev/null)
+  fi
+  chmod 0600 "$CONF_DIR/wgcf-account.toml" "$CONF_DIR/wgcf-profile.conf"
+  [[ "$WARP_ROUTE_ALL" -eq 0 ]] || route_args=(--route-all)
+  shahrah --state "$CONF_DIR/state.json" warp enable --profile "$CONF_DIR/wgcf-profile.conf" \
+    --interface warp "${route_args[@]}" >/dev/null
+  shahrah --state "$CONF_DIR/state.json" warp wg-conf --out /etc/wireguard/warp.conf >/dev/null
+  chmod 0600 /etc/wireguard/warp.conf
+  # Hy2 binds this iface; Xray speaks WireGuard itself (Table=off avoids fighting policy routing).
+  systemctl enable --now wg-quick@warp >/dev/null
+  systemctl restart wg-quick@warp || true
+  # Re-render data planes so the warp outbound / ACL take effect.
+  shahrah --state "$CONF_DIR/state.json" apply --xray-bin /usr/local/bin/xray \
+    --config-out "$CONF_DIR/xray.json" --group "$SERVICE_USER" >/dev/null
+  systemctl restart "$SERVICE_NAME"
+  if [[ -f "$CONF_DIR/hysteria2.yaml" ]]; then
+    shahrah --state "$CONF_DIR/state.json" hysteria2 server --out "$CONF_DIR/hysteria2.yaml" >/dev/null
+    chown root:"$SERVICE_USER" "$CONF_DIR/hysteria2.yaml"
+    chmod 0640 "$CONF_DIR/hysteria2.yaml"
+    systemctl restart shahrah-hysteria2 || true
+  fi
+  log "warp egress up (google-family${WARP_ROUTE_ALL:+ + route-all}); iface warp / Xray outbound tag warp"
 }
 
 install_waterwall() {
@@ -552,6 +610,7 @@ main() {
   setup_firewall
   [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
   [[ "$WITH_HY2" -eq 0 ]] || install_hysteria2
+  [[ "$WITH_WARP" -eq 0 ]] || install_warp
   [[ -z "$WW_SIDE" ]] || install_waterwall
 
   log "done. Client link for user 'first' (keep it private):"

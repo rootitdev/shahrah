@@ -40,6 +40,7 @@ from . import (
     subserve,
     tactics,
     vantage,
+    warp,
     waterwall,
 )
 from . import soak as soakmod
@@ -534,6 +535,27 @@ def _build_parser() -> argparse.ArgumentParser:
     hy.add_argument("--config-path", default="/etc/shahrah/hysteria2.yaml")
     hy.add_argument("--out", type=Path, help="write the config here (mode 0600)")
 
+    wp = sub.add_parser(
+        "warp",
+        help="Cloudflare WARP egress for Google-family destinations (wgcf WireGuard)",
+    )
+    wp.add_argument(
+        "action",
+        choices=["enable", "disable", "show", "wg-conf", "unit"],
+    )
+    wp.add_argument(
+        "--profile",
+        type=Path,
+        help="enable: path to a wgcf-generated WireGuard profile",
+    )
+    wp.add_argument(
+        "--route-all",
+        action="store_true",
+        help="send all egress through WARP (not only Google-family)",
+    )
+    wp.add_argument("--interface", default="warp", help="wg-quick interface name (Hy2 bindDevice)")
+    wp.add_argument("--out", type=Path, help="wg-conf/unit: write here (mode 0600)")
+
     nc = sub.add_parser(
         "node-check",
         help="read-only node readiness checks learned from past outages (DIAG_LESSONS.md)",
@@ -692,7 +714,6 @@ def _parse_listener(spec: str) -> Listener:
         raise ConfigError(
             f"listener must look like PORT:PROFILE ({choices}); got {spec!r}"
         ) from exc
-
 
 def _burn_hook(executable: Path) -> Callable[[Sequence[str]], None]:
     """Build the on-burn hook. The operator script receives endpoint names only (validated
@@ -1048,6 +1069,73 @@ def _parse_hop(text: str) -> tuple[int, int] | None:
     return int(low), int(high)
 
 
+
+def _run_warp(args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO) -> int:
+    """Enable/disable Cloudflare WARP egress and render the wg-quick profile."""
+    if args.action == "enable":
+        if args.profile is None:
+            raise ConfigError("warp enable needs --profile /path/to/wgcf-profile.conf")
+        settings = warp.load_wgcf_profile(args.profile)
+        # dataclasses.replace-style via with_warp after rebuilding flags
+        from dataclasses import replace as _replace
+
+        settings = _replace(
+            settings,
+            route_all=bool(args.route_all) or settings.route_all,
+            interface=args.interface or settings.interface,
+        )
+        save_state(state_path, state.with_warp(settings))
+        out.write(
+            f"warp enabled (iface {settings.interface}; "
+            f"{'route-all' if settings.route_all else 'google-family'})\n"
+        )
+        out.write("next: shahrah apply && systemctl restart shahrah-xray\n")
+        out.write(
+            "      shahrah warp wg-conf --out /etc/wireguard/warp.conf && "
+            "systemctl enable --now wg-quick@warp\n"
+        )
+        if state.hysteria2 is not None:
+            out.write(
+                "      shahrah hysteria2 server --out /etc/shahrah/hysteria2.yaml && "
+                "systemctl restart shahrah-hysteria2\n"
+            )
+        return 0
+    if args.action == "disable":
+        save_state(state_path, state.with_warp(None))
+        out.write("warp disabled (re-apply xray / hysteria2 to drop the outbound)\n")
+        return 0
+    settings = state.warp
+    if settings is None:
+        raise ConfigError("warp is not enabled: run `shahrah warp enable --profile ...` first")
+    if args.action == "show":
+        out.write(
+            f"interface={settings.interface} endpoint={settings.endpoint} "
+            f"address={settings.address_v4} route_all={settings.route_all}\n"
+        )
+        return 0
+    if args.action == "wg-conf":
+        text = warp.wg_quick_conf(settings)
+        if args.out:
+            write_private_file(args.out, text)
+            out.write(f"wrote {args.out}\n")
+        else:
+            out.write(text)
+        return 0
+    if args.action == "unit":
+        # Document-only pointer: standard wg-quick@.service from wireguard-tools.
+        text = (
+            "# Use the distro unit: systemctl enable --now wg-quick@warp\n"
+            "# after writing /etc/wireguard/warp.conf via `shahrah warp wg-conf`.\n"
+        )
+        if args.out:
+            write_private_file(args.out, text)
+            out.write(f"wrote {args.out}\n")
+        else:
+            out.write(text)
+        return 0
+    raise ConfigError(f"unknown warp action: {args.action}")
+
+
 def _run_hysteria2(
     args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO
 ) -> int:
@@ -1088,7 +1176,7 @@ def _run_hysteria2(
             out.write(" ".join(argv) + "\n")
         return 0
     if action == "server":
-        text = hysteria2.render_server(settings, list(state.users))
+        text = hysteria2.render_server(settings, list(state.users), warp=state.warp)
     else:
         user = state.find_user(args.label) if args.label else state.users[0]
         text = hysteria2.render_client(settings, state.public_host, user, socks_listen=args.socks)
@@ -1569,6 +1657,8 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "hysteria2":
         return _run_hysteria2(args, state_path, state, out)
+    if args.command == "warp":
+        return _run_warp(args, state_path, state, out)
 
     if args.command == "tuning-profile":
         if args.name:
@@ -1580,7 +1670,7 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "apply":
         if not state.users:
             raise ConfigError("no users yet: run `shahrah user add <label>` first")
-        text = dumps(render_server_config(state.server_settings(), list(state.users)))
+        text = dumps(render_server_config(state.server_settings(), list(state.users), warp=state.warp))
         if not args.no_validate:
             _validate_with_xray(args.xray_bin, text)
         _write_service_config(args.config_out, text, args.group)

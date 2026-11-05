@@ -126,6 +126,7 @@ def render_server_config(
     users: Sequence[User],
     *,
     log_level: str = "warning",
+    warp: "WarpSettings | None" = None,
 ) -> dict[str, Any]:
     """Return the full Xray server config as a JSON-serialisable dict."""
     labels = [user.label for user in users]
@@ -193,6 +194,18 @@ def render_server_config(
 
     rules.append({"type": "field", "ip": list(PRIVATE_NETWORKS), "outboundTag": "block"})
     rules.append({"type": "field", "protocol": ["bittorrent"], "outboundTag": "block"})
+    if warp is not None:
+        from .warp import xray_outbound, xray_routing_rules
+
+        config["outbounds"].insert(0, xray_outbound(warp))
+        warp_rules = xray_routing_rules(warp)
+        if warp.route_all:
+            # After private/bittorrent blocks so LAN SSRF stays closed.
+            rules.extend(warp_rules)
+        else:
+            # Google-family before the default direct; domain match never hits private IPs.
+            for rule in reversed(warp_rules):
+                rules.insert(0, rule)
     return config
 
 

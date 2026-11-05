@@ -229,7 +229,7 @@ def _obfs_lines(password: str) -> list[str]:
     ]
 
 
-def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: str = "") -> str:
+def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: str = "", warp: "WarpSettings | None" = None) -> str:
     """Server YAML. Auth is per user (``label:uuid``), so revoking a user in Shahrah revokes
     their Hysteria access on the next ``apply``."""
     if not users:
@@ -266,6 +266,14 @@ def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: 
         "  inline:",
         *(f"    - {_q(f'reject({net})')}" for net in EGRESS_BLOCKED),
     ]
+    if warp is not None:
+        from .warp import hy2_acl_lines, hy2_acl_route_all, hy2_outbounds
+
+        lines.extend(hy2_outbounds(warp))
+        inline_at = next(i for i, ln in enumerate(lines) if ln.strip() == "inline:")
+        for offset, ln in enumerate(hy2_acl_lines(warp)):
+            lines.insert(inline_at + 1 + offset, ln)
+        lines.extend(hy2_acl_route_all(warp))
     return "\n".join(lines) + "\n"
 
 

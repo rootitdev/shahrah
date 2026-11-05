@@ -16,6 +16,7 @@ from typing import Any, cast
 
 from . import keys
 from .hysteria2 import Hy2Settings, share_link
+from .warp import WarpSettings
 from .models import (
     CRISIS_PORTS,
     RISKY_TARGET_SUFFIXES,
@@ -75,6 +76,7 @@ class NodeState:
     users: tuple[User, ...] = field(default_factory=tuple)
     extra_listeners: tuple[Listener, ...] = ()
     hysteria2: Hy2Settings | None = None  # optional QUIC/UDP social path
+    warp: WarpSettings | None = None  # optional Cloudflare WARP egress for Google
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
@@ -147,6 +149,10 @@ class NodeState:
     def with_access_log(self, path: str | None) -> NodeState:
         """Enable or disable the Xray access log (required for SNI watch)."""
         return replace(self, access_log=path)
+
+    def with_warp(self, settings: WarpSettings | None) -> NodeState:
+        """Attach or clear Cloudflare WARP egress (Google-family / route-all)."""
+        return replace(self, warp=settings)
 
     def with_hysteria2(self, settings: Hy2Settings | None) -> NodeState:
         """Enable (or with ``None`` disable) the Hysteria2 UDP path."""
@@ -293,6 +299,8 @@ class NodeState:
         }
         if self.hysteria2 is not None:
             data["hysteria2"] = self.hysteria2.to_dict()
+        if self.warp is not None:
+            data["warp"] = self.warp.to_dict()
         return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
     @classmethod
@@ -321,6 +329,7 @@ class NodeState:
                 hysteria2=Hy2Settings.from_dict(data["hysteria2"])
                 if data.get("hysteria2")
                 else None,
+                warp=WarpSettings.from_dict(data["warp"]) if data.get("warp") else None,
             )
         except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
             if isinstance(exc, ConfigError):
