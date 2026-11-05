@@ -52,3 +52,16 @@ When you have real DNS, run [`deploy/attach-domain.sh`](../deploy/attach-domain.
 * Never commit the real CDN hostname or origin IP to git.
 * Rotate the XHTTP path if the URL leaks; treat it like a credential.
 * Keep REALITY multi-port as fallback when the CDN product/WAF breaks the tunnel.
+
+## Port 80 REALITY+XHTTP (not recommended)
+
+Field finding (EXIT xray 26.10.21): a `reality-xhttp` listener on TCP 80 fails even on
+loopback (client dials, tunnel never carries data). Prefer:
+
+* `reality-vision` on 443
+* `cdn-xhttp` behind Cloudflare (plain origin + edge TLS)
+* WaterWall relay
+
+Do not ship port-80 REALITY+XHTTP as a default crisis path until upstream XHTTP+REALITY on
+non-443 is proven. ``install.sh --multi-port`` therefore adds only ``53:reality-xhttp``
+(not 80).
