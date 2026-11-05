@@ -242,9 +242,14 @@ def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: 
         f"  key: {_q(settings.key_path)}",
         *_obfs_lines(settings.obfs_password),
         *_quic_lines(TUNING[settings.tuning], client=False),
-        # Honour the client's declared rate (the social preset declares a modest one).
-        "ignoreClientBandwidth: false",
+        # Share-link clients often omit bandwidth; without a server cap Brutal saturates a
+        # lossy MTU-1400 path and large fetches stall. Cap to the social preset and ignore
+        # a missing client declaration.
+        "ignoreClientBandwidth: true",
         "speedTest: false",
+        "bandwidth:",
+        f"  up: {_q(CLIENT_BANDWIDTH[settings.tuning].up or '10 mbps')}",
+        f"  down: {_q(CLIENT_BANDWIDTH[settings.tuning].down or '50 mbps')}",
         'udpIdleTimeout: "60s"',
         "auth:",
         '  type: "userpass"',

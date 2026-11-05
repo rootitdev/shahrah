@@ -46,6 +46,9 @@ def test_server_config_has_salamander_userpass_and_social_windows() -> None:
     assert f'"u-alpha": "{USER.uuid}"' in text
     assert "maxStreamReceiveWindow: 4194304" in text  # social preset, not the 8 MiB default
     assert 'listen: ":8443"' in text
+    # Cap Brutal without relying on share-link clients declaring bandwidth.
+    assert "ignoreClientBandwidth: true" in text
+    assert 'up: "10 mbps"' in text and 'down: "50 mbps"' in text
     with pytest.raises(ConfigError):
         hy.render_server(_settings(), [])
 
