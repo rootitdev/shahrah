@@ -218,7 +218,7 @@ class Listener:
     def __post_init__(self) -> None:
         validate_port(self.port)
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
-        if self.profile in {Profile.REALITY_XHTTP, Profile.CDN_XHTTP} and self.xhttp_path == "/":
+        if self.profile is Profile.REALITY_XHTTP and self.xhttp_path == "/":
             raise ConfigError(
                 "xhttp_path '/' collides with the REALITY/cover site root and stalls the "
                 "stream; use a dedicated path such as /shahrah"

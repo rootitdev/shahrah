@@ -35,6 +35,25 @@ STATE_VERSION = 1
 _STATS_UNSET = object()
 
 
+def _migrate_xhttp_path(path: str, profile: Profile) -> str:
+    """Old installs used path ``/``, which stalls REALITY+XHTTP against a cover site root."""
+    if path == "/" and profile is Profile.REALITY_XHTTP:
+        return "/shahrah"
+    return path
+
+
+def _listener_from_state(data: dict) -> Listener:
+    profile = Profile(data["profile"])
+    return Listener(
+        data["port"],
+        profile,
+        _migrate_xhttp_path(data["xhttp_path"], profile),
+        data["xhttp_mode"],
+        data.get("cdn_host", ""),
+        data.get("edge_tls", True),
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class NodeState:
     """Everything needed to render the server config and the client-facing endpoint."""
@@ -295,20 +314,10 @@ class NodeState:
                 access_log=data.get("access_log"),
                 tuning_profile=data.get("tuning_profile", "default"),
                 stats_api_port=data.get("stats_api_port"),
-                xhttp_path=data["xhttp_path"],
+                xhttp_path=_migrate_xhttp_path(data["xhttp_path"], Profile(data["profile"])),
                 xhttp_mode=data["xhttp_mode"],
                 users=tuple(User(u["uuid"], u["label"]) for u in data["users"]),
-                extra_listeners=tuple(
-                    Listener(
-                        i["port"],
-                        Profile(i["profile"]),
-                        i["xhttp_path"],
-                        i["xhttp_mode"],
-                        i.get("cdn_host", ""),
-                        i.get("edge_tls", True),
-                    )
-                    for i in data.get("listeners", [])
-                ),
+                extra_listeners=tuple(_listener_from_state(i) for i in data.get("listeners", [])),
                 hysteria2=Hy2Settings.from_dict(data["hysteria2"])
                 if data.get("hysteria2")
                 else None,

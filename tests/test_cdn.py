@@ -199,9 +199,9 @@ def test_old_state_without_cdn_fields_still_loads() -> None:
     data["listeners"] = [
         {"port": 80, "profile": "reality-xhttp", "xhttp_path": "/", "xhttp_mode": "stream-one"}
     ]
-    assert NodeState.from_json(json.dumps(data)).extra_listeners[0].profile is (
-        Profile.REALITY_XHTTP
-    )
+    loaded = NodeState.from_json(json.dumps(data)).extra_listeners[0]
+    assert loaded.profile is Profile.REALITY_XHTTP
+    assert loaded.xhttp_path == "/shahrah"  # migrated off the cover-root collision
 
 
 def test_listener_spec_parsing() -> None:
