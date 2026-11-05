@@ -164,7 +164,7 @@ RECOMMENDED_SYSCTL: Mapping[str, str] = {
     "net.ipv4.tcp_fin_timeout": "15",
     "net.ipv4.tcp_tw_reuse": "1",
     "net.ipv4.tcp_slow_start_after_idle": "0",
-    "net.ipv4.tcp_mtu_probing": "1",
+    "net.ipv4.tcp_mtu_probing": "2",
 }
 
 
