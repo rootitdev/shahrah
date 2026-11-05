@@ -158,5 +158,13 @@ def test_new_data_planes_are_pinned(text: str) -> None:
     for name in ("HY2_SHA256_AMD64", "HY2_SHA256_ARM64", "WW_SHA256_X64", "WW_SHA256_ARM64"):
         value = re.search(rf'{name}="([0-9a-f]*)"', text)
         assert value and len(value.group(1)) == 64, name
-    for flag in ("--with-hysteria2", "--hy2-hop", "--with-warp", "--warp-route-all", "--with-waterwall", "--ww-peer", "relay"):
+    for flag in (
+        "--with-hysteria2",
+        "--hy2-hop",
+        "--with-warp",
+        "--warp-route-all",
+        "--with-waterwall",
+        "--ww-peer",
+        "relay",
+    ):
         assert flag in text

@@ -82,7 +82,7 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --port PORT       listen port (default 443; other ports weaken allowlist survival)
   --extra-listener PORT:PROFILE
                     additional listening port, repeatable (e.g. 80:reality-xhttp, or a CDN origin\n                    8080:cdn-xhttp:cdn.example.com[:PATH[:http]])
-  --multi-port      preset: also listen on 80 and 53 with reality-xhttp (443 + 80 + 53)
+  --multi-port      preset: also listen on 53 with reality-xhttp (443 + 53; port 80 REALITY dropped)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
   --with-paqet PORT also run a paqet server (raw-packet crisis path) on PORT (not 80/443)
@@ -112,7 +112,8 @@ parse_args() {
       --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
       --port) PORT="${2:?--port needs a value}"; shift 2 ;;
       --extra-listener) EXTRA_LISTENERS+=("${2:?--extra-listener needs PORT:PROFILE}"); shift 2 ;;
-      --multi-port) EXTRA_LISTENERS+=("80:reality-xhttp" "53:reality-xhttp"); shift ;;
+      # Port-80 REALITY+XHTTP fails on current Xray (loopback timeout); keep 53 only.
+      --multi-port) EXTRA_LISTENERS+=("53:reality-xhttp"); shift ;;
       --ssh-port) SSH_PORT="${2:?--ssh-port needs a value}"; shift 2 ;;
       --no-firewall) FIREWALL=0; shift ;;
       --with-paqet) WITH_PAQET=1; PAQET_PORT="${2:?--with-paqet needs a PORT}"; shift 2 ;;
@@ -354,24 +355,38 @@ install_warp() {
   fi
   chmod 0600 "$CONF_DIR/wgcf-account.toml" "$CONF_DIR/wgcf-profile.conf"
   [[ "$WARP_ROUTE_ALL" -eq 0 ]] || route_args=(--route-all)
+  # Default: Google-family only via Xray's native WireGuard outbound (no system routes/DNS).
   shahrah --state "$CONF_DIR/state.json" warp enable --profile "$CONF_DIR/wgcf-profile.conf" \
     --interface warp "${route_args[@]}" >/dev/null
-  shahrah --state "$CONF_DIR/state.json" warp wg-conf --out /etc/wireguard/warp.conf >/dev/null
-  chmod 0600 /etc/wireguard/warp.conf
-  # Hy2 binds this iface; Xray speaks WireGuard itself (Table=off avoids fighting policy routing).
-  systemctl enable --now wg-quick@warp >/dev/null
-  systemctl restart wg-quick@warp || true
-  # Re-render data planes so the warp outbound / ACL take effect.
   shahrah --state "$CONF_DIR/state.json" apply --xray-bin /usr/local/bin/xray \
     --config-out "$CONF_DIR/xray.json" --group "$SERVICE_USER" >/dev/null
   systemctl restart "$SERVICE_NAME"
+
+  # Optional Hy2 bindDevice iface: Table=off, no DNS line, MTU 1280 (never steals default route).
   if [[ -f "$CONF_DIR/hysteria2.yaml" ]]; then
+    command -v wg-quick >/dev/null || apt-get install -y -qq wireguard-tools >/dev/null
+    shahrah --state "$CONF_DIR/state.json" warp wg-conf --out /etc/wireguard/warp.conf >/dev/null
+    chmod 0600 /etc/wireguard/warp.conf
+    if grep -q '^DNS' /etc/wireguard/warp.conf; then
+      die "refusing WARP iface: wg-conf must not set DNS (would hijack host resolver)"
+    fi
+    if ! grep -q '^Table = off' /etc/wireguard/warp.conf; then
+      die "refusing WARP iface: wg-conf must set Table = off"
+    fi
+    systemctl enable wg-quick@warp >/dev/null
+    systemctl restart wg-quick@warp
+    # Confirm host default route still via the uplink, not WARP.
+    if ip -4 route show default | grep -q 'dev warp'; then
+      systemctl stop wg-quick@warp || true
+      die "WARP iface stole the default route; rolled back wg-quick@warp"
+    fi
     shahrah --state "$CONF_DIR/state.json" hysteria2 server --out "$CONF_DIR/hysteria2.yaml" >/dev/null
     chown root:"$SERVICE_USER" "$CONF_DIR/hysteria2.yaml"
     chmod 0640 "$CONF_DIR/hysteria2.yaml"
     systemctl restart shahrah-hysteria2 || true
   fi
-  log "warp egress up (google-family${WARP_ROUTE_ALL:+ + route-all}); iface warp / Xray outbound tag warp"
+  log "warp egress: Google-family via Xray WireGuard outbound (no host route/DNS change)"
+  [[ "$WARP_ROUTE_ALL" -eq 0 ]] || log "  WARNING: --warp-route-all is set (all egress via WARP)"
 }
 
 install_waterwall() {
