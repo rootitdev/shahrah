@@ -227,8 +227,8 @@ def systemd_unit(
         f"WorkingDirectory={workdir}\n"
         f"ExecStart={binary} -c:{workdir}/core.json\n"
         "Restart=always\nRestartSec=3\n"
-        "AmbientCapabilities=CAP_NET_BIND_SERVICE\n"
-        "CapabilityBoundingSet=CAP_NET_BIND_SERVICE\n"
+        "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_ADMIN\n"
+        "CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_ADMIN\n"
         "NoNewPrivileges=true\nLimitNOFILE=1048576\n\n"
         "[Install]\nWantedBy=multi-user.target\n"
     )
