@@ -365,8 +365,16 @@ def refresh(
     timeout_s: float = sni_scout.DEFAULT_TIMEOUT_S,
     handshake: Handshake | None = None,
     resolver: sni_dns.Resolver = sni_dns.system_resolver,
+    vantage: str = "local",
+    asn: int | None = None,
 ) -> SniBank:
-    """Re-verify candidates (all, or only expired/near-expiry ones) from this vantage."""
+    """Re-verify candidates (all, or only expired/near-expiry ones) from this vantage.
+
+    Also records an :class:`Observation` under ``vantage`` so a single ``refresh`` on the
+    exit (or Iran) updates multi-vantage scores without a separate report/merge step.
+    Iran boxes should prefer ``sni-bank report`` + exit-side ``merge`` when they must not
+    overwrite the exit's TLS/DNS fields: pass a bank whose ``node_ip`` matches this host.
+    """
     now = time.time() if now is None else now
     shake = handshake or sni_scout._handshake
     for cand in bank.candidates:
@@ -374,7 +382,20 @@ def refresh(
             continue
         result = shake(cand.host, 443, timeout_s)
         dns = sni_dns.check(cand.host, bank.node_ip, resolver) if bank.node_ip else None
-        bank = bank.upsert(apply_check(cand, result, now, dns))
+        updated = apply_check(cand, result, now, dns)
+        blocked = not result.ok and any(
+            k in result.detail for k in ("ConnectionResetError", "TimeoutError", "timed out")
+        )
+        obs = Observation(
+            vantage=vantage,
+            asn=asn,
+            at=now,
+            ok=result.ok,
+            blocked=blocked,
+            latency_ms=result.latency_ms,
+        )
+        kept = (*tuple(o for o in updated.observations if o.vantage != vantage), obs)
+        bank = bank.upsert(replace(updated, observations=kept))
     return bank
 
 

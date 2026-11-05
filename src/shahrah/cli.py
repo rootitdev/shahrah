@@ -362,6 +362,8 @@ def _build_parser() -> argparse.ArgumentParser:
     b_ref = bsub.add_parser("refresh", help="re-verify due candidates from this host (the exit)")
     b_ref.add_argument("--all", action="store_true", help="re-verify everything, not just due")
     b_ref.add_argument("--timeout", type=float, default=5.0)
+    b_ref.add_argument("--vantage", default="local", help="observation label stored in the bank")
+    b_ref.add_argument("--asn", type=int, help="ASN of this vantage for scoring")
     b_list = bsub.add_parser("list", help="score and list candidates, best first")
     b_list.add_argument("--region", choices=sni_bank.REGIONS)
     b_list.add_argument("--strict-dns", action="store_true")
@@ -1773,6 +1775,8 @@ def _sni_bank(args: argparse.Namespace, out: TextIO) -> int:
             ttl_s=ttl,
             timeout_s=args.timeout,
             resolver=sni_dns.system_resolver,
+            vantage=getattr(args, "vantage", None) or "local",
+            asn=getattr(args, "asn", None),
         )
         sni_bank.save_bank(path, bank)
         cmd, args.region, args.strict_dns, args.json = "list", None, False, False

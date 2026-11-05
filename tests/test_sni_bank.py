@@ -45,6 +45,26 @@ def test_score_prefers_dns_plausible_names_over_faster_mismatches() -> None:
     assert strict["fast-famous.example"].total < strict["own.example"].total
 
 
+def test_refresh_records_local_vantage_observation() -> None:
+    def resolve(name: str) -> list[str]:
+        return ["203.0.113.10"] if name.endswith(".example") else ["198.51.100.1"]
+
+    bank = sb.SniBank(node_ip="203.0.113.10")
+    bank = bank.add(["own.example"], "foreign", NOW)
+    bank = sb.refresh(
+        bank,
+        NOW,
+        handshake=lambda h, p, t: _ok(h, 12.0),
+        resolver=resolve,
+        vantage="exit-nl",
+        asn=60781,
+    )
+    cand = bank.get("own.example")
+    assert cand is not None and cand.observations
+    obs = cand.observations[-1]
+    assert obs.vantage == "exit-nl" and obs.asn == 60781 and obs.ok and obs.latency_ms == 12.0
+
+
 def test_tls_failure_gates_score_and_cert_expiry_is_penalised() -> None:
     dead = sb.Candidate("dead.example", verified_at=NOW, tls_ok=False, detail="timeout")
     assert sb.score(dead, NOW).total == 0.0
