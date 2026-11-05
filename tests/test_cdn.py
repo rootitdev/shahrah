@@ -212,6 +212,8 @@ def test_listener_spec_parsing() -> None:
     assert generated.xhttp_mode == "packet-up" and len(generated.xhttp_path) >= 9
     assert generated.xhttp_path != _parse_listener("8080:cdn-xhttp:cdn.example.com").xhttp_path
     fixed = _parse_listener("8080:cdn-xhttp:cdn.example.com:my-secret-path:http")
+    edged = _parse_listener("8080:cdn-xhttp:cdn.example.com:my-secret-path:https:2053")
+    assert edged.edge_port == 2053 and edged.edge_tls
     assert fixed.xhttp_path == "/my-secret-path" and not fixed.edge_tls
     with pytest.raises(ConfigError):
         _parse_listener("8080:cdn-xhttp")  # host missing

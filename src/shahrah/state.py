@@ -52,6 +52,7 @@ def _listener_from_state(data: dict) -> Listener:
         data["xhttp_mode"],
         data.get("cdn_host", ""),
         data.get("edge_tls", True),
+        data.get("edge_port", 0),
     )
 
 
@@ -200,7 +201,11 @@ class NodeState:
         return Endpoint(
             name=f"{prefix}-cdn-{listener.port}",
             host=listener.cdn_host,
-            port=443 if listener.edge_tls else 80,
+            port=(
+                listener.edge_port
+                if listener.edge_port
+                else (443 if listener.edge_tls else 80)
+            ),
             profile=listener.profile,
             sni=listener.cdn_host if listener.edge_tls else "",
             tls=listener.edge_tls,
@@ -293,6 +298,7 @@ class NodeState:
                     "xhttp_mode": item.xhttp_mode,
                     "cdn_host": item.cdn_host,
                     "edge_tls": item.edge_tls,
+                    "edge_port": item.edge_port,
                 }
                 for item in self.extra_listeners
             ],

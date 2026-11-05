@@ -214,6 +214,7 @@ class Listener:
     xhttp_mode: str = "stream-one"
     cdn_host: str = ""
     edge_tls: bool = True
+    edge_port: int = 0  # 0 = 443 (TLS) or 80 (plain); CF-compatible alt e.g. 2053
 
     def __post_init__(self) -> None:
         validate_port(self.port)
@@ -237,8 +238,12 @@ class Listener:
                     "a cdn-xhttp path must be unguessable (at least "
                     f"{MIN_CDN_PATH_LENGTH} characters): the origin speaks plain HTTP"
                 )
+            if self.edge_port:
+                validate_port(self.edge_port, "cdn edge port")
         elif self.cdn_host:
             raise ConfigError("cdn_host is only valid for cdn-xhttp listeners")
+        elif self.edge_port:
+            raise ConfigError("edge_port is only valid for cdn-xhttp listeners")
 
 
 @dataclass(frozen=True, slots=True)

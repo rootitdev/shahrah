@@ -681,10 +681,11 @@ def _write_service_config(path: Path, text: str, group: str | None) -> None:
 
 
 def _parse_listener(spec: str) -> Listener:
-    """Parse ``PORT:PROFILE`` or, for a CDN listener, ``PORT:cdn-xhttp:HOST[:PATH[:http]]``.
+    """Parse ``PORT:PROFILE`` or CDN ``PORT:cdn-xhttp:HOST[:PATH[:http|https[:EDGEPORT]]]``.
 
     An empty PATH generates a random unguessable one; a trailing ``http`` means clients reach
-    the edge without TLS (port 80).
+    the edge without TLS (port 80). ``EDGEPORT`` (e.g. 2053) is the Cloudflare-facing port
+    when 443 is taken by REALITY on the origin.
     """
     port_text, _, rest = spec.partition(":")
     profile_text, _, cdn_text = rest.partition(":")
@@ -695,9 +696,21 @@ def _parse_listener(spec: str) -> Listener:
                 raise ConfigError(f"unexpected extra fields for {profile_text}: {cdn_text!r}")
             return Listener(int(port_text), profile)
         host, _, tail = cdn_text.partition(":")
-        path_text, _, scheme = tail.partition(":")
-        if scheme not in ("", "http", "https"):
-            raise ConfigError(f"edge scheme must be http or https: {scheme!r}")
+        parts = [p for p in tail.split(":") if p != ""] if tail else []
+        path_text = ""
+        scheme = ""
+        edge_port = 0
+        if parts and parts[0] not in ("http", "https") and not parts[0].isdigit():
+            path_text = parts.pop(0)
+        if parts:
+            if parts[0] in ("http", "https"):
+                scheme = parts.pop(0)
+            elif not parts[0].isdigit():
+                raise ConfigError(f"edge scheme must be http or https: {parts[0]!r}")
+        if parts:
+            if len(parts) != 1 or not parts[0].isdigit():
+                raise ConfigError(f"cdn edge port must be an integer: {parts!r}")
+            edge_port = int(parts[0])
         path = f"/{path_text.lstrip('/')}" if path_text else f"/{secrets.token_urlsafe(12)}"
         return Listener(
             int(port_text),
@@ -706,6 +719,7 @@ def _parse_listener(spec: str) -> Listener:
             xhttp_mode="packet-up",
             cdn_host=host,
             edge_tls=scheme != "http",
+            edge_port=edge_port,
         )
     except ValueError as exc:
         if isinstance(exc, ConfigError):
@@ -714,6 +728,7 @@ def _parse_listener(spec: str) -> Listener:
         raise ConfigError(
             f"listener must look like PORT:PROFILE ({choices}); got {spec!r}"
         ) from exc
+
 
 def _burn_hook(executable: Path) -> Callable[[Sequence[str]], None]:
     """Build the on-burn hook. The operator script receives endpoint names only (validated
