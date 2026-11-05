@@ -210,7 +210,7 @@ class Listener:
 
     port: int
     profile: Profile
-    xhttp_path: str = "/"
+    xhttp_path: str = "/shahrah"
     xhttp_mode: str = "stream-one"
     cdn_host: str = ""
     edge_tls: bool = True
@@ -218,6 +218,11 @@ class Listener:
     def __post_init__(self) -> None:
         validate_port(self.port)
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile in {Profile.REALITY_XHTTP, Profile.CDN_XHTTP} and self.xhttp_path == "/":
+            raise ConfigError(
+                "xhttp_path '/' collides with the REALITY/cover site root and stalls the "
+                "stream; use a dedicated path such as /shahrah"
+            )
         if self.profile is Profile.CDN_XHTTP:
             if not self.cdn_host or is_ip(self.cdn_host):
                 raise ConfigError("a cdn-xhttp listener needs cdn_host set to a domain name")
@@ -248,7 +253,7 @@ class ServerSettings:
     reality: RealityServer
     listen: str = "0.0.0.0"  # noqa: S104 - a public VPN server must listen on all interfaces
     port: int = 443
-    xhttp_path: str = "/"
+    xhttp_path: str = "/shahrah"
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False  # permit ports outside CRISIS_PORTS (443/80/53)
     stats_api_port: int | None = None  # loopback-only gRPC stats API for usage accounting
@@ -261,6 +266,11 @@ class ServerSettings:
     def __post_init__(self) -> None:
         validate_port(self.port)
         _validate_xhttp(self.xhttp_path, self.xhttp_mode)
+        if self.profile is Profile.REALITY_XHTTP and self.xhttp_path == "/":
+            raise ConfigError(
+                "xhttp_path '/' collides with the REALITY cover site root and stalls the "
+                "stream; use a dedicated path such as /shahrah"
+            )
         if self.profile is Profile.CDN_XHTTP:
             raise ConfigError("the primary listener must be a REALITY profile")
         if self.access_log is not None and (
@@ -321,7 +331,7 @@ class Endpoint:
     sni: str = ""  # REALITY: handshake target; CDN: TLS server name
     tls: bool = True  # CDN profile only: does the client use TLS to the edge?
     fingerprint: str = "chrome"
-    xhttp_path: str = "/"
+    xhttp_path: str = "/shahrah"
     xhttp_mode: str = "stream-one"
     priority: int = 0
     lockdown_capable: bool = False

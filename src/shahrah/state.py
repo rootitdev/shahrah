@@ -47,7 +47,7 @@ class NodeState:
     short_ids: tuple[str, ...]
     port: int = 443
     target_port: int = 443
-    xhttp_path: str = "/"
+    xhttp_path: str = "/shahrah"
     xhttp_mode: str = "stream-one"
     allow_non_443: bool = False
     access_log: str | None = None
@@ -77,7 +77,7 @@ class NodeState:
         profile: Profile = Profile.REALITY_VISION,
         port: int = 443,
         allow_non_443: bool = False,
-        xhttp_path: str = "/",
+        xhttp_path: str = "/shahrah",
         xhttp_mode: str = "stream-one",
         extra_listeners: tuple[Listener, ...] = (),
     ) -> NodeState:

@@ -129,3 +129,12 @@ def test_listener_ports_must_be_unique_and_allowed(reality: RealityServer) -> No
             extra_listeners=(Listener(80, Profile.REALITY_XHTTP),),
             stats_api_port=80,
         )
+
+
+def test_reality_xhttp_rejects_root_path_that_collides_with_cover(reality: RealityServer) -> None:
+    with pytest.raises(ConfigError, match="collides"):
+        ServerSettings(profile=Profile.REALITY_XHTTP, reality=reality, xhttp_path="/")
+    with pytest.raises(ConfigError, match="collides"):
+        Listener(80, Profile.REALITY_XHTTP, xhttp_path="/")
+    ok = ServerSettings(profile=Profile.REALITY_XHTTP, reality=reality)
+    assert ok.xhttp_path == "/shahrah"
