@@ -125,3 +125,11 @@ def test_cli_renders_both_sides(tmp_path, capsys) -> None:
         assert any(n["settings"].get("password") == secret for n in cfg["nodes"])
         assert (tmp_path / side / "core.json").exists()
     assert secret not in capsys.readouterr().out
+
+
+def test_core_json_default_mtu_matches_common_vps_overlay() -> None:
+    from shahrah.waterwall import core_json, systemd_unit
+
+    assert core_json("config.json")["misc"]["mtu"] == 1400
+    unit = systemd_unit()
+    assert "CAP_NET_ADMIN" in unit

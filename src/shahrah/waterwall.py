@@ -196,7 +196,7 @@ def render_exit(b: Backhaul) -> dict[str, Any]:
 def core_json(config_file: str, workers: int = 0, log_dir: str = "/var/log/shahrah-ww/") -> dict:
     """``core.json``: logs warn-level only (no per-connection history on a seized box)."""
     level = {"loglevel": "WARN", "file": "", "console": True}
-    misc: dict[str, Any] = {"ram-profile": "server", "mtu": 1500, "try-enabling-bbr": True}
+    misc: dict[str, Any] = {"ram-profile": "server", "mtu": 1400, "try-enabling-bbr": True}
     if workers:
         misc["workers"] = workers
     return {
