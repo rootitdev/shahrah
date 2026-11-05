@@ -355,8 +355,11 @@ install_waterwall() {
 }
 
 install_relay() {
+  [[ -n "$WW_PEER" ]] || die "relay role needs --ww-peer IP (the exit)"
   [[ "$FIREWALL" -eq 0 ]] || { detect_ssh_port; ufw allow "${SSH_PORT}/tcp" >/dev/null; ufw --force enable >/dev/null; }
   install_waterwall
+  # Optional crisis path on the Iran box itself (same paqet key as the exit, or its own).
+  [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
   log "relay ready: users keep their exit REALITY links, pointed at this server's IP"
 }
 
