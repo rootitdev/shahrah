@@ -23,6 +23,11 @@ Certificates: Hysteria needs real TLS. With a self-signed certificate clients mu
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .warp import WarpSettings
+
 import base64
 import hashlib
 import json
@@ -213,6 +218,8 @@ def _quic_lines(t: QuicTuning, *, client: bool) -> list[str]:
         f"  maxStreamReceiveWindow: {t.max_stream_window}",
         f"  initConnReceiveWindow: {t.init_conn_window}",
         f"  maxConnReceiveWindow: {t.max_conn_window}",
+        "  maxDatagramFrameSize: 1000",
+        "  initPacketSize: 1200",
         f"  maxIdleTimeout: {_q(f'{t.max_idle_s}s')}",
     ]
     if client:
@@ -229,7 +236,13 @@ def _obfs_lines(password: str) -> list[str]:
     ]
 
 
-def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: str = "", warp: "WarpSettings | None" = None) -> str:
+def render_server(
+    settings: Hy2Settings,
+    users: Sequence[User],
+    *,
+    listen_host: str = "",
+    warp: WarpSettings | None = None,
+) -> str:
     """Server YAML. Auth is per user (``label:uuid``), so revoking a user in Shahrah revokes
     their Hysteria access on the next ``apply``."""
     if not users:
@@ -242,15 +255,13 @@ def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: 
         f"  key: {_q(settings.key_path)}",
         *_obfs_lines(settings.obfs_password),
         *_quic_lines(TUNING[settings.tuning], client=False),
-        # Share-link clients often omit bandwidth; without a server cap Brutal saturates a
-        # lossy MTU-1400 path and large fetches stall. Cap to the social preset and ignore
-        # a missing client declaration.
+        # Prefer QUIC congestion over Brutal on lossy IRAN↔EXIT UDP: omit bandwidth so
+        # the server does not pace with Brutal. ignoreClientBandwidth stays true so a
+        # client that *does* declare bandwidth cannot force unlimited Brutal either
+        # (Hysteria still ignores client rates when this is set and server has no cap).
         "ignoreClientBandwidth: true",
         "speedTest: false",
-        "bandwidth:",
-        f"  up: {_q(CLIENT_BANDWIDTH[settings.tuning].up or '10 mbps')}",
-        f"  down: {_q(CLIENT_BANDWIDTH[settings.tuning].down or '50 mbps')}",
-        'udpIdleTimeout: "60s"',
+        'udpIdleTimeout: "120s"',
         "auth:",
         '  type: "userpass"',
         "  userpass:",
@@ -269,11 +280,14 @@ def render_server(settings: Hy2Settings, users: Sequence[User], *, listen_host: 
     if warp is not None:
         from .warp import hy2_acl_lines, hy2_acl_route_all, hy2_outbounds
 
-        lines.extend(hy2_outbounds(warp))
+        # ACL first (google -> warp, rejects, then direct catch-all), then outbounds.
         inline_at = next(i for i, ln in enumerate(lines) if ln.strip() == "inline:")
         for offset, ln in enumerate(hy2_acl_lines(warp)):
             lines.insert(inline_at + 1 + offset, ln)
         lines.extend(hy2_acl_route_all(warp))
+        # With an explicit outbounds list, unmatched traffic is no longer implicit-direct.
+        lines.append("    - direct(all)")
+        lines.extend(hy2_outbounds(warp))
     return "\n".join(lines) + "\n"
 
 

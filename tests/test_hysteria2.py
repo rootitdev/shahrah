@@ -45,10 +45,11 @@ def test_server_config_has_salamander_userpass_and_social_windows() -> None:
     assert 'type: "salamander"' in text and f'password: "{OBFS}"' in text
     assert f'"u-alpha": "{USER.uuid}"' in text
     assert "maxStreamReceiveWindow: 4194304" in text  # social preset, not the 8 MiB default
+    assert "maxDatagramFrameSize: 1000" in text
     assert 'listen: ":8443"' in text
-    # Cap Brutal without relying on share-link clients declaring bandwidth.
+    # Prefer QUIC congestion over Brutal on lossy IR paths; still ignore client rates.
     assert "ignoreClientBandwidth: true" in text
-    assert 'up: "10 mbps"' in text and 'down: "50 mbps"' in text
+    assert "bandwidth:" not in text
     with pytest.raises(ConfigError):
         hy.render_server(_settings(), [])
 
