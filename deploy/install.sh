@@ -173,6 +173,18 @@ install_packages() {
     || die "Python >= 3.11 is required (found $($PYTHON_BIN -V))"
 }
 
+disable_resolved_stub() {
+  # Ubuntu/Debian stub on 127.0.0.53/54:53 blocks binding crisis port 53.
+  if ! systemctl is-active --quiet systemd-resolved 2>/dev/null; then
+    return 0
+  fi
+  log "disabling systemd-resolved DNSStubListener so port 53 can bind"
+  install -d /etc/systemd/resolved.conf.d
+  printf '[Resolve]\nDNSStubListener=no\n' >/etc/systemd/resolved.conf.d/90-shahrah.conf
+  ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
+  systemctl restart systemd-resolved
+}
+
 free_public_ports() {
   # A re-used VPS often still has nginx / an old Xray / a reverse proxy on 443/80/53.
   local port listener
@@ -182,12 +194,23 @@ free_public_ports() {
       [[ -n "$listener" ]] || continue
       case "$listener" in
         *'"xray"'*|*"shahrah-xray"*) continue ;;
+        *systemd-resolve*|*'"systemd-resolve"'*)
+          if [[ "$port" == "53" ]]; then
+            disable_resolved_stub
+            break
+          fi
+          ;;
       esac
       log "port ${port} is busy ($listener); stopping common leftovers (nginx, xray, caddy)"
       systemctl stop nginx xray caddy path-web 2>/dev/null || true
       systemctl disable nginx xray caddy path-web 2>/dev/null || true
       break
     done < <(ss -ltnpH "sport = :${port}" 2>/dev/null || true)
+    if ss -ltnpH "sport = :${port}" 2>/dev/null | grep -vE '"xray"|shahrah-xray' | grep -q .; then
+      if [[ "$port" == "53" ]] && ss -ltnpH 'sport = :53' 2>/dev/null | grep -q systemd-resolve; then
+        disable_resolved_stub
+      fi
+    fi
     if ss -ltnpH "sport = :${port}" 2>/dev/null | grep -vE '"xray"|shahrah-xray' | grep -q .; then
       die "TCP port ${port} is still in use; stop the process and re-run the installer"
     fi
@@ -583,14 +606,8 @@ free_dns_port() {
   if ! shahrah --state "$CONF_DIR/state.json" listener list | awk '{print $1}' | grep -qx 53; then
     return
   fi
-  log "port 53 is used by a listener: disabling the systemd-resolved stub"
-  if systemctl is-active --quiet systemd-resolved; then
-    install -d /etc/systemd/resolved.conf.d
-    printf '[Resolve]\nDNSStubListener=no\n' > /etc/systemd/resolved.conf.d/90-shahrah.conf
-    ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf
-    systemctl restart systemd-resolved
-  fi
-  if ss -ltnpH 'sport = :53' | grep -v '"xray"' | grep -q .; then
+  disable_resolved_stub
+  if ss -ltnpH 'sport = :53' 2>/dev/null | grep -vE '"xray"|shahrah-xray' | grep -q .; then
     die "TCP port 53 is already used by another service; stop it or drop the 53 listener"
   fi
 }
