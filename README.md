@@ -1,95 +1,143 @@
-# Shahrah
+# شاهراه (Shahrah)
 
-A resilient anti-censorship VPN platform built on [Xray-core](https://github.com/XTLS/Xray-core).
-Goal: stable access to social media, messengers and AI services for thousands of users in
-heavily filtered networks, with servers that are hard to find and easy to install.
+پلتفرم ضدسانسور روی [Xray-core](https://github.com/XTLS/Xray-core) برای دسترسی پایدار به شبکه‌های اجتماعی، پیام‌رسان و سرویس‌های AI.
 
-> **Status: early development.** Control-plane core, real tunnel prober, node installer,
-> PasarGuard integration and the brain loop are unit/loopback tested. A functional Iran→foreign
-> tunnel (REALITY+XHTTP on 443/80) and local StatsService usage counters have been verified on
-> lab VPS boxes; live PasarGuard (self-signed HTTPS) + brain host-steering (incl. disabling
-> filtered TCP/53), capacity/sysctl guidance, leak-resistant client template, and an HMAC
-> `settle-hook` stand-in, Instagram multiplier in ops, exit loopback load at 2000 tunnels,
-> and Iran-path concurrent HTTPS waves at **3000** have been verified on lab VPS boxes.
-> Lab also verified a **30 min** Iran-path social/AI soak at **99.95%** and `shahrah leakcheck`.
-> **Still unproven:** public-CA panel/subs, a real payment provider in front of settle-hook,
-> real CDN edge, multi-hour soak at production-scale heavy sessions, dedicated client.
-> See [docs/EVIDENCE.md](docs/EVIDENCE.md), [docs/OPERATOR.md](docs/OPERATOR.md),
-> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/PANEL.md](docs/PANEL.md) and
-> [docs/CAPACITY.md](docs/CAPACITY.md).
+شاهراه **فقط نصب‌کنندهٔ WaterWall نیست.** هستهٔ کار Xray + REALITY است؛ تانل ایران↔خارج، پنل، و مسیرهای بحرانی **اختیاری** و جدا نصب می‌شوند.
 
-## Install a node
+---
 
-Debian 12+ or Ubuntu 24.04+ (Python >= 3.11), as root:
+## دو حالت نصب (مهم)
+
+### حالت ۱ — فقط سرور خارج (Exit)
+
+یک VPS خارج داری. کلاینت **مستقیم** به همان سرور وصل می‌شود.  
+سرور ایران / تانل لازم نیست.
+
+مناسب وقتی: تست، تعداد کم کاربر، یا هنوز رله ایران نخواستی.  
+محدودیت: از بعضی شبکه‌های داخل ایران، IP خارج ممکن است مستقیم فیلتر شود.
 
 ```bash
-git clone <this repository> shahrah && cd shahrah
-sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com
+ssh root@IP_خارج
+cd /opt && git clone https://github.com/rootitdev/shahrah.git && cd shahrah
 
-# resilient variant: 443 (Vision) + 80 and 53 (XHTTP), the TCP ports that survive allowlist shutdowns
-sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com --multi-port
+./deploy/install.sh \
+  --host IP_خارج \
+  --target www.cloudflare.com \
+  --multi-port
 ```
 
-The installer downloads a **pinned, checksum-verified** Xray, generates the REALITY keys on the
-machine, installs a hardened systemd service, enables BBR and opens only SSH and the VPN port in
-`ufw`. It prints a `vless://` link for a first user that any ready-made client (v2rayNG,
-Hiddify, Streisand, v2rayN, ...) can import. Re-running it upgrades the software and keeps the
-existing keys and users.
+- `--host` = آدرس همین سرور خارج (IP یا دامنه)
+- `--target` = فقط **پوشش TLS** (لباس ترافیک)؛ کلاینت به Cloudflare وصل نمی‌شود
+- `--multi-port` = علاوه بر 443، پورت بحرانی 53 هم باز می‌شود
 
-Day-to-day:
+---
+
+### حالت ۲ — ایران + خارج (رله بین کاربر و Exit)
+
+دو VPS: **ایران** و **خارج**.  
+کاربر → ایران → تانل → خارج → اینترنت آزاد.
+
+اینجا WaterWall (و در صورت نیاز paqet / مسیرهای دیگر) برای **بک‌هال بین دو سرور** است، نه جایگزین کل پروژه.
+
+**الف) خارج**
+
+```bash
+ssh root@IP_خارج
+cd /opt && git clone https://github.com/rootitdev/shahrah.git && cd shahrah
+
+./deploy/install.sh \
+  --host IP_خارج \
+  --target www.cloudflare.com \
+  --multi-port \
+  --with-waterwall exit \
+  --ww-peer IP_ایران
+```
+
+کلید تانل را از Exit بردار (معمولاً زیر `/etc/shahrah/`) و به ایران کپی کن.
+
+**ب) ایران — رله**
+
+```bash
+ssh root@IP_ایران
+cd /opt && git clone https://github.com/rootitdev/shahrah.git && cd shahrah
+
+./deploy/install.sh \
+  --role relay \
+  --with-waterwall iran \
+  --ww-peer IP_خارج
+```
+
+**ج) ایران — brain (سلامت مسیر + هدایت پنل)**
+
+```bash
+./deploy/install.sh --role brain
+```
+
+**د) پنل کاربران (PasarGuard)** جدا نصب می‌شود؛ بعد با API به شاهراه وصل می‌شود.  
+جزئیات: [docs/PANEL.md](docs/PANEL.md)
+
+> نصب را روی **خود VPS** بزن (با SSH). روی لپ‌تاپ / WSL نصب نکن.
+
+---
+
+## شاهراه از چه چیزهایی تشکیل شده؟
+
+| لایه | نقش | اجباری؟ |
+|---|---|---|
+| Xray + REALITY (Vision / XHTTP) | تونل اصلی کاربر | بله (Exit) |
+| Brain + Oracle | سنجش مسیر سالم و مرتب‌سازی host در پنل | برای حالت پایدار پیشنهاد می‌شود |
+| PasarGuard | کاربر، حجم، سابسکریپشن | برای فروش/مدیریت کاربر |
+| WaterWall | بک‌هال ایران↔خارج | فقط حالت ۲ |
+| paqet / Hysteria2 / WARP / CDN-XHTTP | مسیرهای کمکی / بحران | اختیاری |
+| rootit + پنل‌های `/ig/` `/settle/` `/watch/` | بازیابی ساب، فروش، دیده‌بان | اختیاری |
+
+ایده این است بهترین قطعات چند پروژه (Xray/REALITY، پنل PasarGuard، بک‌هال، health، ops) کنار هم باشند؛ WaterWall فقط **یک** گزینه برای لینک دو سرور است.
+
+---
+
+## بعد از نصب Exit — کار روزمره
 
 ```bash
 shahrah user add alice
-shahrah apply --xray-bin /usr/local/bin/xray --config-out /etc/shahrah/xray.json --group shahrah
+shahrah apply --xray-bin /usr/local/bin/xray \
+  --config-out /etc/shahrah/xray.json --group shahrah
 systemctl restart shahrah-xray
-shahrah link alice        # vless:// link
-shahrah sub alice         # base64 subscription body
+
+shahrah link alice   # لینک vless://
+shahrah sub alice    # بدنهٔ ساب
 ```
 
-## What exists today
+کلاینت‌های آماده (v2rayNG، Hiddify، Streisand، …) لینک را ایمپورت می‌کنند.
 
-| Module | Purpose |
+---
+
+## اسناد بیشتر
+
+| سند | موضوع |
 |---|---|
-| `shahrah.models` | Validated models for servers, users and client endpoints. Refuses unsafe defaults (non-443 ports, IP REALITY targets, Apple/iCloud targets). |
-| `shahrah.xray_config` | Renders an Xray server config: VLESS + REALITY with XTLS-Vision (raw) or XHTTP, no access log by default, private-range and BitTorrent blocking, optional loopback-only stats API. |
-| `shahrah.accounting` | Per-user uplink/downlink from Xray StatsService (`shahrah usage`); install enables port 10085 on independent nodes. |
-| `shahrah.capacity` | Sizing hints for 1k–3k concurrent users (`shahrah capacity --users N`). |
-| `shahrah.settle` | HMAC payment webhook that credits PasarGuard expiry/traffic (`shahrah settle-hook`). |
-| `shahrah.ig_mult` | Instagram CDN billing weight inside `shahrah ops` (hit-share proxy, no browse archive). |
-| `shahrah.ops` | Unified ops console: status, SNI scout/watch, usage, ig-mult (PasarGuard stays external). |
-| `shahrah probe` | Iran-path smoke: HTTPS through brain tunnels (Instagram/Telegram/…) plus optional `--wave`. |
-| `shahrah.links` | Builds `vless://` links and base64 subscription bodies that ready-made clients import. |
-| `shahrah.oracle` | Pure path-health decision engine: fail/recover streaks, minimum dwell time, outage and allowlist-style (`restricted`) detection. |
-| `shahrah.prober`, `shahrah.xray_client` | Real tunnel prober: one Xray client process, a SOCKS port per endpoint, an actual HTTPS request through each tunnel (not just a TLS check of the edge). Its output feeds the oracle. |
-| `shahrah.keys`, `shahrah.state` | Pure-Python X25519 (RFC 7748) key generation and the atomic, owner-only node state file. |
-| `shahrah.panel`, `shahrah.roles` | PasarGuard integration: reorder/disable panel hosts from the oracle ranking (fail-open when nothing is healthy), least-privilege role presets validated against the panel's real models. |
-| `shahrah.brain` | The loop: probe -> oracle -> panel, tolerant of prober and panel failures. Run with `shahrah brain --config brain.json`. |
-| `shahrah.deploy`, `shahrah.cli` | systemd unit, firewall plan and sysctl generators; the `shahrah` command. |
+| [docs/OPERATOR.md](docs/OPERATOR.md) | Runbook اپراتور |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | معماری |
+| [docs/PANEL.md](docs/PANEL.md) | اتصال به PasarGuard |
+| [docs/PANELS.md](docs/PANELS.md) | پنل‌های اختیاری ig / settle / watch |
+| [docs/CDN.md](docs/CDN.md) | لبه CDN |
+| [docs/CAPACITY.md](docs/CAPACITY.md) | ظرفیت |
 
-Rendered configs are verified against a **real Xray binary** (`xray run -test`), and the prober
-has an end-to-end test that runs a real Xray server and client on loopback.
+وضعیت آزمایشگاهی و محدودیت‌ها: [docs/EVIDENCE.md](docs/EVIDENCE.md)
 
-## Development
+---
 
-Requires Python 3.11+ and has no runtime dependencies.
+## توسعه
+
+Python 3.11+، بدون وابستگی runtime:
 
 ```bash
-python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
+python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 ruff check . && ruff format --check .
-pytest                                          # set XRAY_BIN to also run the Xray-backed tests
+pytest
 ```
 
-Without an Xray binary the Xray-backed tests are skipped, everything else still runs. The
-end-to-end test (`-m e2e`) additionally needs internet access.
+## مجوز
 
-## Principles
-
-- No hardcoded hosts, IPs, domains or secrets anywhere in the repository.
-- The server never logs which sites users visit.
-- Pure logic is separated from I/O so behaviour is unit-testable.
-
-## License
-
-Apache-2.0, see [LICENSE](LICENSE). PasarGuard (AGPL-3.0) is used only through its REST API and is not bundled or linked.
-
+Apache-2.0 — [LICENSE](LICENSE).  
+PasarGuard (AGPL-3.0) فقط از طریق REST API استفاده می‌شود و داخل این ریپو bundle نشده است.
