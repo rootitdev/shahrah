@@ -59,6 +59,15 @@ def test_serve_sub_unit_keeps_path_secret_out_of_argv() -> None:
     assert "User=shahrah" in unit
 
 
+def test_rootit_unit_keeps_panel_api_key_out_of_argv() -> None:
+    unit = deploy.rootit_unit()
+    assert "EnvironmentFile=/etc/shahrah/rootit.env" in unit
+    assert "rootit serve --config /etc/shahrah/rootit.json" in unit
+    assert "API_KEY" not in unit
+    assert "User=shahrah" in unit
+    assert "ReadWritePaths=/etc/shahrah" in unit
+
+
 def test_sysctl_enables_mtu_probing_with_safe_base_mss() -> None:
     from shahrah.deploy import sysctl_conf
     text = sysctl_conf()

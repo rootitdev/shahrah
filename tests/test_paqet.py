@@ -68,6 +68,10 @@ def test_pinned_digests_are_well_formed() -> None:
         assert digest in text
     assert paqet.PAQET_VERSION in text
     assert text.index("checksum mismatch for paqet") < text.index('install -m 0755 "$dir/paqet')
+    # Relay installs the client toward --ww-peer; exit/node keep the server.
+    assert '[[ "$ROLE" == "relay" ]]' in text
+    assert "paqet-config client" in text
+    assert "shahrah-paqet-client.service" in text
 
 
 def test_crisis_hook_starts_and_stops_client() -> None:

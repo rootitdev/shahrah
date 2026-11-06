@@ -30,6 +30,29 @@ def test_round_trip_preserves_everything(node: NodeState, tmp_path: Path) -> Non
     assert load_state(path) == node
 
 
+def test_client_host_fronts_reality_but_not_hy2_host(node: NodeState) -> None:
+    fronted = node.with_client_host("203.0.113.10")
+    assert fronted.endpoints()[0].host == "203.0.113.10"
+    assert fronted.public_host == "vpn.example.org"
+    cleared = fronted.with_client_host(None)
+    assert cleared.endpoints()[0].host == "vpn.example.org"
+
+
+def test_client_host_fronts_crisis_reality_ports_only(node: NodeState) -> None:
+    data = json.loads(node.to_json())
+    data["allow_non_443"] = True
+    node = (
+        NodeState.from_json(json.dumps(data))
+        .with_listener(Listener(53, Profile.REALITY_VISION))
+        .with_listener(Listener(8444, Profile.REALITY_XHTTP))
+        .with_client_host("203.0.113.10")
+    )
+    by_port = {ep.port: ep.host for ep in node.endpoints()}
+    assert by_port[443] == "203.0.113.10"
+    assert by_port[53] == "203.0.113.10"
+    assert by_port[8444] == "vpn.example.org"
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
 def test_state_file_is_owner_only(node: NodeState, tmp_path: Path) -> None:
     path = tmp_path / "state.json"

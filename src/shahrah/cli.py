@@ -33,6 +33,7 @@ from . import (
     paqet,
     provision,
     readycheck,
+    rootit,
     settle,
     sni_bank,
     sni_scout,
@@ -307,9 +308,105 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("print", help="print host files generated for the installer")
     show.add_argument(
-        "what", choices=["systemd-unit", "brain-unit", "serve-sub-unit", "ufw", "sysctl"]
+        "what",
+        choices=["systemd-unit", "brain-unit", "serve-sub-unit", "rootit-unit", "ufw", "sysctl"],
     )
     show.add_argument("--ssh-port", type=int, default=22)
+
+    rot = sub.add_parser(
+        "rootit",
+        help="PasarGuard-backed subscription recovery portal (/mysub)",
+    )
+    rot_sub = rot.add_subparsers(dest="rootit_command", required=True)
+    rot_init = rot_sub.add_parser("init", help="write a new rootit.json (prints admin token)")
+    rot_init.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_init.add_argument("--panel-url", default=os.environ.get("SHAHRAH_PANEL_URL", ""))
+    rot_init.add_argument("--public-host", required=True, help="subscription public hostname")
+    rot_init.add_argument("--public-port", type=int, default=2096)
+    rot_init.add_argument("--public-scheme", default="https", choices=["https", "http"])
+    rot_init.add_argument(
+        "--require-password",
+        action="store_true",
+        help="require local PIN (default: off for emergency recovery)",
+    )
+    rot_init.add_argument("--force", action="store_true", help="overwrite existing config")
+
+    rot_base = rot_sub.add_parser("set-base", help="change the public subscription origin")
+    rot_base.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_base.add_argument("--host", required=True)
+    rot_base.add_argument("--port", type=int, default=2096)
+    rot_base.add_argument("--scheme", default="https", choices=["https", "http"])
+
+    rot_auth = rot_sub.add_parser("set-auth", help="toggle local PIN requirement")
+    rot_auth.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_auth_g = rot_auth.add_mutually_exclusive_group(required=True)
+    rot_auth_g.add_argument("--require-password", action="store_true")
+    rot_auth_g.add_argument("--no-password", action="store_true")
+
+    rot_pin = rot_sub.add_parser(
+        "set-pin", help="set an explicit 6-char PIN [a-z0-9] for a PasarGuard username"
+    )
+    rot_pin.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_pin.add_argument("username")
+    rot_pin.add_argument("pin", help="exactly 6 chars: lowercase letters and digits")
+
+    rot_issue = rot_sub.add_parser(
+        "issue-pin",
+        help="generate a random 6-char PIN, store hash, print plaintext once",
+    )
+    rot_issue.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_issue.add_argument("username")
+
+    rot_issue_many = rot_sub.add_parser(
+        "issue-pins",
+        help="generate PINs for many usernames (file: one username per line; prints user|pin)",
+    )
+    rot_issue_many.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_issue_many.add_argument(
+        "--file", type=Path, required=True, help="usernames file (one per line)"
+    )
+
+    rot_serve = rot_sub.add_parser("serve", help="run the /mysub HTTP portal")
+    rot_serve.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_serve.add_argument("--listen", default="127.0.0.1:8790")
+
+    rot_url = rot_sub.add_parser(
+        "url", help="resolve one user's public subscription URL via PasarGuard"
+    )
+    rot_url.add_argument(
+        "--config",
+        type=Path,
+        default=Path(os.environ.get("SHAHRAH_ROOTIT_CONFIG", "/etc/shahrah/rootit.json")),
+    )
+    rot_url.add_argument("username")
 
     rotate = sub.add_parser(
         "rotate-reality",
@@ -411,6 +508,22 @@ def _build_parser() -> argparse.ArgumentParser:
         "retarget", help="change the REALITY target / SNI (then apply + restart)"
     )
     retarget.add_argument("target", help="TLS 1.3 domain the server will imitate")
+
+    chost = sub.add_parser(
+        "client-host",
+        help="front REALITY client links via a domestic WaterWall entry IP/host",
+    )
+    chost.add_argument(
+        "host",
+        nargs="?",
+        default=None,
+        help="Iran/entry host clients dial; omit with --clear",
+    )
+    chost.add_argument(
+        "--clear",
+        action="store_true",
+        help="use public_host again for REALITY links",
+    )
 
     ops_cmd = sub.add_parser(
         "ops", help="unified ops console (status, SNI scout/watch, usage, ig-mult)"
@@ -834,6 +947,84 @@ def _probe_destinations(specs: Sequence[str]) -> list[ProbeTarget]:
     return out
 
 
+def _run_rootit(args: argparse.Namespace, out: TextIO) -> int:
+    """PasarGuard subscription recovery portal commands."""
+    config_path: Path = args.config
+    if args.rootit_command == "init":
+        if config_path.exists() and not args.force:
+            raise ConfigError(f"{config_path} exists (pass --force to overwrite)")
+        panel_url = (args.panel_url or "").strip()
+        if not panel_url:
+            raise ConfigError("--panel-url or SHAHRAH_PANEL_URL is required")
+        cfg = rootit.RootitConfig.from_dict(
+            {
+                **rootit.default_config().as_dict(),
+                "panel_url": panel_url,
+                "public_host": args.public_host.lower(),
+                "public_port": args.public_port,
+                "public_scheme": args.public_scheme,
+                "require_password": bool(args.require_password),
+            }
+        )
+        rootit.save_config(config_path, cfg)
+        out.write(f"wrote {config_path}\n")
+        out.write(f"admin_token={cfg.admin_token}\n")
+        out.write(f"public_base={cfg.base()}\n")
+        out.write("set SHAHRAH_PANEL_API_KEY in the service EnvironmentFile\n")
+        return 0
+    if args.rootit_command == "set-base":
+        cfg = rootit.set_public_base(
+            rootit.load_config(config_path),
+            host=args.host,
+            port=args.port,
+            scheme=args.scheme,
+        )
+        rootit.save_config(config_path, cfg)
+        out.write(f"public_base={cfg.base()}\n")
+        return 0
+    if args.rootit_command == "set-auth":
+        cfg = rootit.load_config(config_path)
+        updated = rootit.RootitConfig.from_dict(
+            {**cfg.as_dict(), "require_password": bool(args.require_password)}
+        )
+        rootit.save_config(config_path, updated)
+        out.write(
+            "require_password=true\n" if updated.require_password else "require_password=false\n"
+        )
+        return 0
+    if args.rootit_command == "set-pin":
+        cfg = rootit.set_pin(rootit.load_config(config_path), args.username, args.pin)
+        rootit.save_config(config_path, cfg)
+        out.write(f"pin set for {args.username}\n")
+        return 0
+    if args.rootit_command == "issue-pin":
+        cfg, pin = rootit.issue_pin(rootit.load_config(config_path), args.username)
+        rootit.save_config(config_path, cfg)
+        out.write(f"{args.username}|{pin}\n")
+        return 0
+    if args.rootit_command == "issue-pins":
+        names = args.file.read_text(encoding="utf-8").splitlines()
+        cfg, issued = rootit.issue_pins_for_usernames(rootit.load_config(config_path), names)
+        rootit.save_config(config_path, cfg)
+        for user, pin in issued:
+            out.write(f"{user}|{pin}\n")
+        return 0
+    if args.rootit_command == "url":
+        cfg = rootit.load_config(config_path)
+        client = rootit.make_panel_client(cfg)
+        url, _user = rootit.resolve_subscription_url(client, cfg, args.username)
+        out.write(url + "\n")
+        return 0
+    if args.rootit_command == "serve":
+        host, _, port_text = args.listen.partition(":")
+        port = int(port_text or "8790")
+        out.write(f"rootit listening on http://{host or '127.0.0.1'}:{port}/mysub\n")
+        out.flush()
+        rootit.serve(config_path, host=host or "127.0.0.1", port=port)
+        return 0
+    raise ConfigError(f"unknown rootit command: {args.rootit_command}")
+
+
 def _run_soak(args: argparse.Namespace) -> int:
     config = BrainConfig.from_json(Path(args.config).read_text(encoding="utf-8"))
     endpoints = list(config.endpoints)
@@ -1248,7 +1439,8 @@ def _run_hysteria2(
         user = state.find_user(args.label) if args.label else state.users[0]
         text = hysteria2.render_client(settings, state.public_host, user, socks_listen=args.socks)
     if args.out:
-        write_private_file(args.out, text)
+        # Unit runs as User=shahrah; keep group-readable like `shahrah apply --group`.
+        _write_service_config(args.out, text, getattr(args, "group", None) or "shahrah")
         out.write(f"wrote {args.out}\n")
     else:
         out.write(text)
@@ -1317,6 +1509,8 @@ def _run(args: argparse.Namespace) -> int:
             out.write(deploy.brain_unit())
         elif args.what == "serve-sub-unit":
             out.write(deploy.serve_sub_unit())
+        elif args.what == "rootit-unit":
+            out.write(deploy.rootit_unit())
         elif args.what == "sysctl":
             out.write(deploy.sysctl_conf())
         elif args.what == "ufw":
@@ -1326,6 +1520,9 @@ def _run(args: argparse.Namespace) -> int:
         else:
             raise ConfigError(f"unknown print target: {args.what}")
         return 0
+
+    if args.command == "rootit":
+        return _run_rootit(args, out)
 
     if args.command == "brain":
         return _run_brain(args)
@@ -1636,6 +1833,22 @@ def _run(args: argparse.Namespace) -> int:
             f"REALITY target -> {state.target_host}\n"
             "next: shahrah apply && systemctl restart shahrah-xray "
             "and update brain.json / client links (sni=)\n"
+        )
+        return 0
+
+    if args.command == "client-host":
+        if args.clear:
+            state = state.with_client_host(None)
+        else:
+            if not args.host:
+                raise ConfigError("pass a host or --clear")
+            state = state.with_client_host(args.host)
+        save_state(state_path, state)
+        shown = state.client_host or state.public_host
+        out.write(
+            f"REALITY client host -> {shown}\n"
+            "(crisis REALITY ports 443/80/53 are fronted; Hy2/SS2022/CDN/other "
+            "REALITY ports keep public_host — re-issue client links / subscription)\n"
         )
         return 0
 

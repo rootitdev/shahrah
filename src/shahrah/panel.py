@@ -228,6 +228,15 @@ class PanelClient:
             raise PanelError("unexpected user payload")
         return data
 
+    def list_users(self, *, offset: int = 0, limit: int = 50) -> dict[str, Any]:
+        """``GET /api/users`` page (PasarGuard pagination)."""
+        if offset < 0 or limit < 1 or limit > 200:
+            raise ConfigError("list_users offset/limit out of range")
+        data = self._request("GET", f"/api/users?offset={offset}&limit={limit}")
+        if not isinstance(data, dict):
+            raise PanelError("unexpected users list payload")
+        return data
+
     def put_user(self, username: str, payload: Mapping[str, Any]) -> dict[str, Any]:
         data = self._request("PUT", f"/api/user/{username}", dict(payload))
         if not isinstance(data, dict):

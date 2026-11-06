@@ -20,6 +20,9 @@ shahrah = "shahrah.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+shahrah = ["data/qrcode.min.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q -m 'not load and not lab'"

@@ -98,6 +98,48 @@ WantedBy=multi-user.target
 """
 
 
+def rootit_unit(
+    *,
+    shahrah_bin: PurePosixPath = DEFAULT_SHAHRAH_BIN,
+    config: PurePosixPath = DEFAULT_CONFIG_DIR / "rootit.json",
+    env_file: PurePosixPath = DEFAULT_CONFIG_DIR / "rootit.env",
+    listen: str = "127.0.0.1:8790",
+    user: str = SERVICE_USER,
+) -> str:
+    """PasarGuard-backed subscription recovery portal (``/mysub``).
+
+    ``rootit.env`` must contain ``SHAHRAH_PANEL_API_KEY=...`` (never on argv). Put a TLS
+    reverse proxy in front; default listen is loopback.
+    """
+    host, _, port_text = listen.partition(":")
+    host = host or "127.0.0.1"
+    port = port_text or "8790"
+    conf_dir = config.parent
+    return f"""[Unit]
+Description=Shahrah rootit (PasarGuard subscription recovery portal)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User={user}
+Group={user}
+EnvironmentFile={env_file}
+ExecStart={shahrah_bin} rootit serve --config {config} --listen {host}:{port}
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths={conf_dir}
+
+[Install]
+WantedBy=multi-user.target
+"""
+
+
 def brain_unit(
     *,
     shahrah_bin: PurePosixPath = DEFAULT_SHAHRAH_BIN,

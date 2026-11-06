@@ -71,6 +71,12 @@ shahrah ops --token "$TOKEN" \
   --ig-mult-config /var/lib/shahrah/ig-mult.json
 ```
 
+Optional kit HTML panels (`/ig/`, `/settle/`, `/watch/`) — separate from `ops`; see [PANELS.md](PANELS.md):
+
+```bash
+sudo PANEL_BASE=https://panel.example.com:2096 ./deploy/install-panels.sh
+```
+
 ## 4. Still needs your domain / hardware
 
 | Gap | Blocker |

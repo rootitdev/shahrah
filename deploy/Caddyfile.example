@@ -6,6 +6,32 @@
 # Panel (PasarGuard) with public CA so ready-made clients accept HTTPS subs:
 panel.example.com {
 	reverse_proxy 127.0.0.1:8000
+
+	# Optional kit panels (deploy/install-panels.sh). Ports avoid serve-sub :8788 and ops :8787.
+	handle_path /ig/* {
+		reverse_proxy 127.0.0.1:8786
+	}
+	handle /ig {
+		redir /ig/ permanent
+	}
+	handle_path /settle/* {
+		reverse_proxy 127.0.0.1:8789
+	}
+	handle /settle {
+		redir /settle/ permanent
+	}
+	handle_path /pay/* {
+		reverse_proxy 127.0.0.1:8789/pay/
+	}
+	handle /pay {
+		redir /pay/ permanent
+	}
+	handle_path /watch/* {
+		reverse_proxy 127.0.0.1:8785
+	}
+	handle /watch {
+		redir /watch/ permanent
+	}
 }
 
 # Optional: expose loopback serve-sub behind TLS (path secret still required):

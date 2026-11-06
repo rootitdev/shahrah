@@ -85,7 +85,8 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
   --multi-port      preset: also listen on 53 with reality-xhttp (443 + 53; port 80 REALITY dropped)
   --ssh-port PORT   SSH port kept open in the firewall (default: auto-detect, else 22)
   --no-firewall     do not touch ufw
-  --with-paqet PORT also run a paqet server (raw-packet crisis path) on PORT (not 80/443)
+  --with-paqet PORT paqet crisis path on PORT (not 80/443): server on node,
+                    client on relay (needs --ww-peer EXIT_IP + copied paqet.key)
   --with-hysteria2 PORT
                     also run a Hysteria2 server (salamander, social tuning) on UDP PORT
   --hy2-hop LOW-HIGH
@@ -506,6 +507,25 @@ install_paqet() {
   mac="$(gateway_mac "$gw" "$iface" || true)"
   [[ -n "$iface" && -n "$ip" && -n "$mac" ]] \
     || die "paqet: cannot detect interface/ip/gateway MAC (iface=${iface:-?} gw=${gw:-?}); set PAQET_ROUTER_MAC"
+
+  # Crisis topology (bbs#570): Iran relay = client, foreign exit = server.
+  # install.sh --role relay --with-paqet PORT --ww-peer EXIT_IP uses the peer as server.
+  if [[ "$ROLE" == "relay" ]]; then
+    [[ -n "$WW_PEER" ]] || die "relay paqet client needs --ww-peer EXIT_IP (paqet server)"
+    [[ -f "$CONF_DIR/paqet.key" ]] \
+      || die "relay paqet client needs ${CONF_DIR}/paqet.key copied from the exit first"
+    shahrah paqet-config client --interface "$iface" --ip "$ip" --router-mac "$mac" \
+      --server-ip "$WW_PEER" --port "$PAQET_PORT" --key-file "$CONF_DIR/paqet.key" \
+      --out "$CONF_DIR/paqet.yaml"
+    shahrah paqet-config unit --unit-role client --config-path "$CONF_DIR/paqet.yaml" \
+      > /etc/systemd/system/shahrah-paqet-client.service
+    systemctl daemon-reload
+    systemctl disable --now shahrah-paqet >/dev/null 2>&1 || true
+    systemctl enable --now shahrah-paqet-client >/dev/null
+    log "paqet client -> ${WW_PEER}:${PAQET_PORT} (SOCKS 127.0.0.1:1080; start via brain --paqet-unit)"
+    return 0
+  fi
+
   shahrah paqet-config server --interface "$iface" --ip "$ip" --router-mac "$mac" \
     --port "$PAQET_PORT" --key-file "$CONF_DIR/paqet.key" --out "$CONF_DIR/paqet.yaml"
   local line
@@ -684,6 +704,10 @@ Next steps (see docs/OPERATOR.md):
   shahrah print serve-sub-unit > /etc/systemd/system/shahrah-serve-sub.service
   systemctl enable --now shahrah-serve-sub
   # size the box: shahrah capacity --users 2000 && shahrah load-test --connections 500
+  # PasarGuard subscription recovery portal (separate resilient host recommended):
+  #   sudo ./deploy/install-rootit.sh --panel-url https://PANEL --public-host SUB_HOST --api-key KEY
+  # optional kit panels (/ig/ sales /settle/ /watch/) — not auto-installed; see docs/PANELS.md:
+  #   sudo PANEL_BASE=https://panel.example.com:2096 ./deploy/install-panels.sh
 EOF
 }
 

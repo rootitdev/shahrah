@@ -9,6 +9,7 @@ import pytest
 
 SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "install.sh"
 ATTACH = Path(__file__).resolve().parent.parent / "deploy" / "attach-domain.sh"
+ROOTIT = Path(__file__).resolve().parent.parent / "deploy" / "install-rootit.sh"
 
 
 @pytest.fixture(scope="module")
@@ -56,7 +57,7 @@ def test_bash_accepts_the_syntax() -> None:
     bash = _find_bash()
     if bash is None:
         pytest.skip("bash not available")
-    for script in (SCRIPT, ATTACH):
+    for script in (SCRIPT, ATTACH, ROOTIT):
         try:
             result = subprocess.run(
                 [bash, "-n", str(script)], capture_output=True, check=False, timeout=20
@@ -66,6 +67,16 @@ def test_bash_accepts_the_syntax() -> None:
         if b"\x00" in result.stdout + result.stderr:
             pytest.skip("bash is only the WSL launcher stub (no distribution installed)")
         assert result.returncode == 0, f"{script.name}: {result.stderr.decode(errors='replace')}"
+
+
+def test_rootit_installer_is_pasarguard_backed() -> None:
+    text = ROOTIT.read_text(encoding="utf-8")
+    assert text.startswith("#!/usr/bin/env bash\n")
+    assert "\r" not in text
+    assert "set -Eeuo pipefail" in text
+    assert "SHAHRAH_PANEL_API_KEY" in text
+    assert "rootit init" in text
+    assert "PasarGuard" in text
 
 
 def test_attach_domain_is_dry_run_by_default() -> None:

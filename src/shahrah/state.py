@@ -89,6 +89,9 @@ class NodeState:
     access_log: str | None = None
     tuning_profile: str = "default"  # key of models.TUNING_PROFILES
     stats_api_port: int | None = None  # loopback StatsService; None = disabled
+    # Optional WaterWall / domestic entry: REALITY clients dial this instead of public_host.
+    # Hy2/SS2022 keep public_host (the exit). CDN/plain-ws keep their own host fields.
+    client_host: str | None = None
     users: tuple[User, ...] = field(default_factory=tuple)
     extra_listeners: tuple[Listener, ...] = ()
     hysteria2: Hy2Settings | None = None  # optional QUIC/UDP social path
@@ -97,6 +100,8 @@ class NodeState:
 
     def __post_init__(self) -> None:
         validate_host(self.public_host, "public host")
+        if self.client_host:
+            validate_host(self.client_host, "client host")
         if self.tuning_profile not in TUNING_PROFILES:
             raise ConfigError(f"unknown tuning profile {self.tuning_profile!r}")
         if keys.public_from_private(self.private_key) != self.public_key:
@@ -224,10 +229,17 @@ class NodeState:
                     )
                 )
             else:
+                # Domestic WaterWall entry usually publishes crisis TCP ports (443/80/53).
+                # Front those through client_host; any other REALITY port stays on public_host
+                # (the entry does not forward arbitrary high ports).
+                if self.client_host and listener.port in CRISIS_PORTS:
+                    host = self.client_host
+                else:
+                    host = self.public_host
                 out.append(
                     Endpoint(
                         name=f"{prefix}-{listener.port}",
-                        host=self.public_host,
+                        host=host,
                         port=listener.port,
                         profile=listener.profile,
                         public_key=self.public_key,
@@ -277,6 +289,12 @@ class NodeState:
             raise ConfigError(f"no extra listener on port {port}")
         return replace(self, extra_listeners=remaining)
 
+    def with_client_host(self, client_host: str | None) -> NodeState:
+        """Front REALITY client links through a domestic WaterWall entry (or clear it)."""
+        if client_host:
+            validate_host(client_host, "client host")
+        return replace(self, client_host=client_host)
+
     def with_target(self, target_host: str) -> NodeState:
         """Point REALITY at a different TLS 1.3 site (the public SNI clients dial)."""
         validate_host(target_host, "REALITY target host")
@@ -321,6 +339,7 @@ class NodeState:
         data: dict[str, Any] = {
             "version": STATE_VERSION,
             "public_host": self.public_host,
+            "client_host": self.client_host,
             "profile": str(self.profile),
             "target_host": self.target_host,
             "target_port": self.target_port,
@@ -366,6 +385,7 @@ class NodeState:
                 raise ConfigError(f"unsupported state version {data['version']!r}")
             return cls(
                 public_host=data["public_host"],
+                client_host=data.get("client_host"),
                 profile=Profile(data["profile"]),
                 target_host=data["target_host"],
                 target_port=data["target_port"],
