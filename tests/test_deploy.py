@@ -70,6 +70,7 @@ def test_rootit_unit_keeps_panel_api_key_out_of_argv() -> None:
 
 def test_sysctl_enables_mtu_probing_with_safe_base_mss() -> None:
     from shahrah.deploy import sysctl_conf
+
     text = sysctl_conf()
     assert "net.ipv4.tcp_mtu_probing = 2" in text
     assert "net.ipv4.tcp_base_mss = 1220" in text

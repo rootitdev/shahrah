@@ -21,10 +21,10 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 
 from .models import ConfigError, validate_host, validate_port
@@ -142,9 +142,7 @@ class RootitConfig:
     insecure_tls: bool = False
 
     def base(self) -> str:
-        return public_base(
-            scheme=self.public_scheme, host=self.public_host, port=self.public_port
-        )
+        return public_base(scheme=self.public_scheme, host=self.public_host, port=self.public_port)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -190,9 +188,7 @@ class RootitConfig:
             if _PIN_RE.fullmatch(text) or text.startswith("scrypt$"):
                 pins[str(name)] = text
             else:
-                raise ConfigError(
-                    f"pin for {name!r} must be 6×[a-z0-9] or a legacy scrypt hash"
-                )
+                raise ConfigError(f"pin for {name!r} must be 6×[a-z0-9] or a legacy scrypt hash")
         return cls(
             panel_url=panel_url,
             public_scheme=scheme,
@@ -347,10 +343,7 @@ def resolve_subscription_url(
 
 def _html_escape(value: str) -> str:
     return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
     )
 
 
@@ -469,7 +462,7 @@ def _user_result(*, username: str, url: str, apology: str, pin: str) -> bytes:
 
 def _admin_nav() -> str:
     return (
-        '<nav>'
+        "<nav>"
         '<a href="/admin/settings">تنظیمات</a>'
         '<a href="/admin/users">کاربران و رمزها</a>'
         '<a href="/mysub">صفحه کاربر</a>'
@@ -567,9 +560,9 @@ def _admin_users_page(
 </div>
 {table}
 <div class="pager">
-<a data-need-token href="/admin/users?page={page-1}" style="{prev_dis}">قبلی</a>
+<a data-need-token href="/admin/users?page={page - 1}" style="{prev_dis}">قبلی</a>
 <span class="muted">صفحه {page} از {pages} — جمع {total}</span>
-<a data-need-token href="/admin/users?page={page+1}" style="{next_dis}">بعدی</a>
+<a data-need-token href="/admin/users?page={page + 1}" style="{next_dis}">بعدی</a>
 </div>
 <script>
 document.querySelectorAll('button[data-pin]').forEach(function(b){{
@@ -830,7 +823,8 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 except (ConfigError, PanelError) as exc:
                     return self._send(400, _admin_users_page(cfg, error=str(exc)))
                 return self._send(
-                    200, _admin_users_page(updated, msg=f"{n} رمز جدید برای یوزرهای بدون رمز ساخته شد")
+                    200,
+                    _admin_users_page(updated, msg=f"{n} رمز جدید برای یوزرهای بدون رمز ساخته شد"),
                 )
             self._send(404, _page("یافت نشد", '<p class="err">404</p>'))
 

@@ -258,11 +258,7 @@ class NodeState:
         return Endpoint(
             name=f"{prefix}-cdn-{listener.port}",
             host=listener.cdn_host,
-            port=(
-                listener.edge_port
-                if listener.edge_port
-                else (443 if listener.edge_tls else 80)
-            ),
+            port=(listener.edge_port if listener.edge_port else (443 if listener.edge_tls else 80)),
             profile=listener.profile,
             sni=listener.cdn_host if listener.edge_tls else "",
             tls=listener.edge_tls,

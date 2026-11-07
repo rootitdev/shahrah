@@ -10,8 +10,6 @@ import json
 import subprocess
 from pathlib import Path
 
-import pytest
-
 from shahrah.models import Listener, Profile, RealityServer, ServerSettings, User
 from shahrah.xray_config import render_server_config
 
@@ -35,7 +33,9 @@ def test_kit_sample_uses_packet_up_not_auto() -> None:
     assert mode != "auto"
 
 
-def test_shahrah_cdn_listener_matches_kit_safe_mode(reality: RealityServer, users: list[User]) -> None:
+def test_shahrah_cdn_listener_matches_kit_safe_mode(
+    reality: RealityServer, users: list[User]
+) -> None:
     server = ServerSettings(
         profile=Profile.REALITY_VISION,
         reality=reality,

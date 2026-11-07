@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -76,6 +77,18 @@ def test_private_project_names_do_not_leak_into_the_public_repo() -> None:
             if pattern.search(text):
                 offenders.append(f"{path.relative_to(ROOT)}: {pattern.pattern}")
     assert not offenders, offenders
+
+
+def test_lt_directory_is_not_tracked_by_git() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "_lt"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+    )
+    assert tracked.returncode == 0
+    assert not tracked.stdout.strip(), tracked.stdout
 
 
 def test_env_files_and_state_are_ignored_by_git() -> None:

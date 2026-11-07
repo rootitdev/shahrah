@@ -1,21 +1,19 @@
 #!/usr/bin/env python3
-"""Apply audit remediation to a local vpn-infra-kit tree (item 2 + 5).
+"""Apply audit + beta remediation to a local vpn-infra-kit tree.
 
 Usage: python3 remediate_kit.py /path/to/vpn-infra-kit
 """
 from __future__ import annotations
 
-import hashlib
 import re
 import sys
-import zipfile
 from pathlib import Path
 
-# Align with shahrah deploy/install.sh (v26.10.21, linux-amd64).
 XRAY_VERSION = "v26.10.21"
 XRAY_SHA256_AMD64 = "0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978"
 PG_NODE_VERSION = "v0.5.6"
-# Pasarguard node zip has no published .dgst in-kit; pin version + size check only.
+HY2_VERSION = "app/v2.13.0"
+HY2_SHA256_AMD64 = "907ba8c9693edb104b20582681fb7dc15639d5b64a9cbb616a7b539190a86691"
 
 
 def lf_all_sh(root: Path) -> int:
@@ -74,27 +72,61 @@ def patch_install_sh(path: Path) -> None:
     )
     if old_iran in text:
         text = text.replace(old_iran, new_iran, 1)
-    # Iran node zip: add minimal integrity (sha256 of zip after download).
-    old_pg = f'curl -fsSL -o "$t/n.zip" "https://github.com/PasarGuard/node/releases/download/${{PG_NODE_VERSION:-v0.5.6}}/pasarguard-node-linux-amd64.zip"'
-    new_pg = f'curl -fsSL --retry 3 -o "$t/n.zip" "https://github.com/PasarGuard/node/releases/download/${{PG_NODE_VERSION:-{PG_NODE_VERSION}}}/pasarguard-node-linux-amd64.zip"'
+    old_pg = (
+        'curl -fsSL -o "$t/n.zip" '
+        '"https://github.com/PasarGuard/node/releases/download/${PG_NODE_VERSION:-v0.5.6}/pasarguard-node-linux-amd64.zip"'
+    )
+    new_pg = (
+        f'curl -fsSL --retry 3 -o "$t/n.zip" '
+        f'"https://github.com/PasarGuard/node/releases/download/${{PG_NODE_VERSION:-{PG_NODE_VERSION}}}/pasarguard-node-linux-amd64.zip"'
+    )
     text = text.replace(old_pg, new_pg, 1)
-    if "sha256sum \"$t/n.zip\"" not in text and "pasarguard-node-linux-amd64.zip" in text:
+    if 'sha256sum "$t/n.zip"' not in text:
         text = text.replace(
             '(cd "$t" && python3 -c \'import zipfile;zipfile.ZipFile("n.zip").extractall(".")\')',
             'log "pasarguard-node zip sha256=$(sha256sum "$t/n.zip" | awk \'{print $1}\')"\n'
             '  (cd "$t" && python3 -c \'import zipfile;zipfile.ZipFile("n.zip").extractall(".")\')',
             1,
         )
+    if "SHAHRAH_WITH_KIT_FAILOVER" not in text:
+        text = text.replace(
+            "phase_preflight(){",
+            'phase_preflight(){\n  [ "${SHAHRAH_BRAIN_ACTIVE:-0}" = 1 ] && die "SHAHRAH_BRAIN_ACTIVE=1 — pick kit failover OR shahrah-brain, not both (docs/CONTROL-PLANE.md)"',
+            1,
+        )
+    path.write_text(text, encoding="utf-8")
+
+
+def patch_bootstrap_iran(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    text = text.replace(
+        'bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release.sh)" @ install',
+        'echo "xray must be supplied under /root/.pg_nodes/bin — no curl|sh install" >&2; exit 1',
+        1,
+    )
+    hy2_old = 'curl -fsSL https://get.hy2.sh | bash'
+    hy2_new = f"""if command -v hysteria >/dev/null; then :; else
+    echo "install hysteria manually or copy to /root/.pg_nodes/bin/hysteria" >&2
+    echo "pinned ref: {HY2_VERSION} sha256:{HY2_SHA256_AMD64}" >&2
+    exit 1
+  fi"""
+    text = text.replace(
+        "  else\n    curl -fsSL https://get.hy2.sh | bash\n  fi",
+        f"  else\n{hy2_new}\n  fi",
+        1,
+    )
+    path.write_text(text, encoding="utf-8")
+
+
+def patch_python_render(path: Path) -> None:
+    text = path.read_text(encoding="utf-8")
+    text = text.replace('"mode": "auto"', '"mode": "packet-up"')
     path.write_text(text, encoding="utf-8")
 
 
 def patch_xhttp_template(path: Path) -> None:
     text = path.read_text(encoding="utf-8")
-    text = re.sub(
-        r'"mode": "auto"',
-        '"mode": "packet-up"',
-        text,
-    )
+    text = re.sub(r'"mode": "auto"', '"mode": "packet-up"', text)
     path.write_text(text, encoding="utf-8")
 
 
@@ -108,15 +140,26 @@ def main() -> int:
         return 1
     converted = lf_all_sh(root)
     patch_install_sh(root / "install.sh")
-    tmpl = root / "templates/reference/exit-xray.json.tmpl"
-    if tmpl.is_file():
-        patch_xhttp_template(tmpl)
-    icore = root / "templates/iran-core.json.tmpl"
-    if icore.is_file():
-        patch_xhttp_template(icore)
+    boot = root / "scripts/bootstrap-iran.sh"
+    if boot.is_file():
+        patch_bootstrap_iran(boot)
+    for py in (
+        root / "scripts/render_exit_configs.py",
+        root / "scripts/render_iran_configs.py",
+    ):
+        if py.is_file():
+            patch_python_render(py)
+    for tmpl in (
+        root / "templates/reference/exit-xray.json.tmpl",
+        root / "templates/iran-core.json.tmpl",
+    ):
+        if tmpl.is_file():
+            patch_xhttp_template(tmpl)
     ga_src = Path(__file__).with_name(".gitattributes")
     (root / ".gitattributes").write_text(ga_src.read_text(encoding="utf-8"), encoding="utf-8")
-    print(f"LF-converted {converted} shell scripts; patched install.sh + XHTTP mode packet-up")
+    print(
+        f"LF-converted {converted} shell scripts; patched install/bootstrap/render/templates"
+    )
     return 0
 
 

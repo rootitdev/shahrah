@@ -14,7 +14,9 @@ What it does:
 1. Converts every `*.sh` to LF and adds `.gitattributes` (item **2**).
 2. Pins Xray to `v26.10.21` with SHA-256 verification (same as `deploy/install.sh` in shahrah) (item **5**).
 3. Removes `curl | sh` for acme.sh and Iran-side Xray-install — installer must copy binaries from Exit instead (item **5**).
-4. Sets kit XHTTP template `mode` from `auto` to `packet-up` on reference templates (item **6**).
+4. Sets XHTTP `mode` to `packet-up` in templates **and** `scripts/render_*_configs.py`.
+5. Removes `curl|sh` from install, Iran bootstrap (xray/hy2 must be copied or pinned manually).
+6. Guards kit vs shahrah-brain in `phase_preflight` when `SHAHRAH_BRAIN_ACTIVE=1`.
 
 After apply, run `./install.sh --plan` on a control host with a filled `.env` (still no production install required for validation).
 
