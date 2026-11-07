@@ -5,7 +5,8 @@
 # Requires backhaul.key from Germany (from germany-attach-waterwall.sh).
 #
 # Usage (on Iran):
-#   sudo EXIT_PEER_IP=203.0.113.9 ./deploy/beta/iran-relay-install.sh
+#   sudo EXIT_PEER_IP=<NL_IPV4> ./deploy/beta/iran-relay-install.sh
+# Offline pip: SHAHRAH_WHEELHOUSE=/opt/wheelhouse (setuptools/wheel + shahrah sdist/wheel preseeded)
 # After Germany copied backhaul.key to /etc/shahrah/backhaul.key on Iran.
 set -euo pipefail
 

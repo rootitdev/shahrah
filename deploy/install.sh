@@ -67,6 +67,8 @@ WW_MODE="reverse"
 WW_TUNNEL_PORT="8443"
 WW_COVER_SNI="www.speedtest.net"
 WW_COVER_ADDR=""
+WW_EXIT_SERVICE=""
+PANEL_OWNED=0
 WORK_DIR=""
 PREINSTALL_SNAP="/var/lib/shahrah/preinstall.snapshot"
 EXPLICIT_HOST=0
@@ -528,9 +530,23 @@ install_warp() {
   [[ "$WARP_ROUTE_ALL" -eq 0 ]] || log "  WARNING: --warp-route-all is set (all egress via WARP)"
 }
 
+preflight_panel_exit_owned() {
+  [[ "$PANEL_OWNED" -eq 1 ]] || return 0
+  if systemctl is-active --quiet shahrah-xray 2>/dev/null; then
+    die "refusing panel-owned WaterWall: shahrah-xray is active (panel node must own :443)"
+  fi
+  if ss -ltnpH 'sport = :443' 2>/dev/null | grep -qE 'shahrah-xray|/usr/local/bin/xray.*xray\.json'; then
+    die "refusing panel-owned WaterWall: non-panel Xray listener on :443"
+  fi
+  WW_EXIT_SERVICE="${WW_EXIT_SERVICE:-127.0.0.1:443}"
+  log "panel-owned exit: WaterWall dials ${WW_EXIT_SERVICE} (no state.json)"
+}
+
 install_waterwall() {
   ensure_shahrah_cli || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
-  local arch expected actual dir self service="127.0.0.1:${PORT}" iran_ip exit_ip
+  preflight_panel_exit_owned
+  local arch expected actual dir self service iran_ip exit_ip
+  service="${WW_EXIT_SERVICE:-127.0.0.1:${PORT}}"
   arch="$(arch_suffix)"
   if [[ "$arch" == amd64 ]]; then arch="x64"; expected="$WW_SHA256_X64"; else expected="$WW_SHA256_ARM64"; fi
   dir="$(mktemp -d)"

@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from .models import ConfigError
@@ -280,7 +280,7 @@ def record_provenance_json(path: Path, kind: str, sha256: str, installed_utc: st
     entries.append(
         BinaryProvenanceEntry(path=path, kind=kind, sha256=sha256, installed_utc=installed_utc)
     )
-    payload = {"entries": [e.__dict__ for e in entries]}
+    payload = {"entries": [asdict(e) for e in entries]}
     PROVENANCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, indent=2) + "\n"
     PROVENANCE_PATH.write_text(text, encoding="utf-8")

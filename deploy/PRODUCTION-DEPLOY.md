@@ -42,13 +42,15 @@ shahrah panel provision --core-name shahrah-nl --state /etc/shahrah/state.json
 # Do NOT enable independent shahrah-xray on 443 if panel node already binds it — disable duplicate unit first
 ```
 
-Backhaul key: `germany-attach-waterwall.sh` / `exit-attach-relay-peer.sh` patterns; copy `backhaul*.key` to Iran out-of-band.
+**Panel-owned :443 (no `state.json` on attach):** `deploy/beta/panel-exit-attach-waterwall.sh` — see `deploy/beta/PANEL-RELAY-OPS.md`.
+
+**Standalone Shahrah exit:** `germany-attach-waterwall.sh` or `exit-attach-relay-peer.sh` (requires `state.json`). Copy `backhaul.key` to Iran out-of-band.
 
 ## Iran — relay
 
 ```bash
 git clone ... /opt/shahrah && git checkout main
-sudo EXIT_PEER_IP=<NL_PUBLIC_IP> ./deploy/beta/iran-relay-install.sh
+sudo SHAHRAH_WHEELHOUSE=/opt/wheelhouse EXIT_PEER_IP=<NL_IPV4> ./deploy/beta/iran-relay-install.sh
 # multi-exit later: iran-bootstrap-relay-peer.sh (see beta runbook)
 ```
 
