@@ -16,6 +16,18 @@ shahrah_cli_has_feature_module() {
     "$SHAHRAH_PYTHON" -m shahrah lifecycle has-feature --name "$feat" >/dev/null 2>&1
 }
 
+# True when the resolved CLI exposes a subcommand (e.g. waterwall-binary plan).
+shahrah_cli_has_subcommand() {
+  local sub="$1"
+  if [[ "${SHAHRAH_CLI_MODE:-}" == module ]]; then
+    PYTHONPATH="${SHAHRAH_SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$SHAHRAH_PYTHON" -m shahrah "$sub" plan --help >/dev/null 2>&1
+    return $?
+  fi
+  [[ -n "${SHAHRAH_CLI:-}" && -x "$SHAHRAH_CLI" ]] || return 1
+  "$SHAHRAH_CLI" "$sub" plan --help >/dev/null 2>&1
+}
+
 _run_shahrah_cli() {
   if [[ "${SHAHRAH_CLI_MODE:-}" == module ]]; then
     PYTHONPATH="${SHAHRAH_SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" \
@@ -95,6 +107,18 @@ resolve_shahrah_cli() {
   bootstrap_shahrah_cli
 }
 
+# Install paths: refresh venv when an old CLI lacks a newly required subcommand.
+resolve_shahrah_cli_for_install() {
+  local need="${1:-}"
+  if resolve_shahrah_cli_readonly; then
+    if [[ -z "$need" ]] || shahrah_cli_has_subcommand "$need"; then
+      return 0
+    fi
+    printf 'note: installed CLI missing %s; bootstrapping from %s\n' "$need" "$SHAHRAH_SRC_DIR" >&2
+  fi
+  bootstrap_shahrah_cli
+}
+
 shahrah_cli_readonly() {
   if ! resolve_shahrah_cli_readonly; then
     return 1
@@ -104,6 +128,13 @@ shahrah_cli_readonly() {
 
 shahrah_cli() {
   resolve_shahrah_cli || return 1
+  _run_shahrah_cli "$@"
+}
+
+shahrah_cli_for_install() {
+  local need="${1:-}"
+  shift || true
+  resolve_shahrah_cli_for_install "$need" || return 1
   _run_shahrah_cli "$@"
 }
 

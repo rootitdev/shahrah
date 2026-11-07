@@ -91,16 +91,16 @@ install_stage_fail() {
 }
 
 # Beta scripts source this file without main(); bootstrap CLI from git before new subcommands.
+# Optional arg: required subcommand (e.g. waterwall-binary) — stale venv is upgraded.
 ensure_shahrah_cli() {
+  local need="${1:-}"
   export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="${PYTHON_BIN:-python3}"
   # shellcheck source=lib/shahrah-cli.sh
   source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
-  if resolve_shahrah_cli 2>/dev/null; then
-    export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
-    shahrah() { shahrah_cli "$@"; }
-    return 0
+  if ! resolve_shahrah_cli_for_install "$need"; then
+    return 1
   fi
-  bootstrap_shahrah_cli && export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+  export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
   shahrah() { shahrah_cli "$@"; }
 }
 
@@ -560,10 +560,10 @@ preflight_panel_exit_owned() {
 }
 
 install_waterwall() {
-  ensure_shahrah_cli || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
+  ensure_shahrah_cli waterwall-binary || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
   ensure_waterwall_host_tools
   preflight_panel_exit_owned
-  local ww_arch plan_json expected actual dir self service iran_ip exit_ip variant url asset
+  local ww_arch plan_json zip_expected actual dir self service iran_ip exit_ip variant url asset skip
   service="${WW_EXIT_SERVICE:-127.0.0.1:${PORT}}"
   case "$(uname -m)" in
     x86_64|amd64) ww_arch="x64" ;;
@@ -573,29 +573,19 @@ install_waterwall() {
   plan_json="$(shahrah_cli waterwall-binary plan --arch "$ww_arch" --variant "$WW_CPU_VARIANT" --write-persist)"
   variant="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["variant"])')"
   asset="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["asset"])')"
-  expected="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')"
+  zip_expected="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["zip_sha256"])')"
   url="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["url"])')"
-  if [[ -f /usr/local/bin/waterwall ]]; then
-    actual="$(sha256sum /usr/local/bin/waterwall | awk '{print $1}')"
-    if [[ "$actual" == "$expected" ]]; then
-      log "WaterWall ${WW_VERSION} (${variant}) binary OK; skip download"
-    else
-      dir="$(mktemp -d)"
-      log "downloading WaterWall ${WW_VERSION} (${variant}, ${asset})"
-      curl -fsSL --retry 3 -o "$dir/ww.zip" "$url"
-      actual="$(sha256sum "$dir/ww.zip" | awk '{print $1}')"
-      [[ "$actual" == "$expected" ]] || die "checksum mismatch for WaterWall (expected $expected, got $actual)"
-      unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
-      install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
-      record_binary_provenance waterwall /usr/local/bin/waterwall
-      rm -rf "$dir"
-    fi
+  skip="$(shahrah_cli waterwall-binary skip-download --arch "$ww_arch" --variant "$variant" \
+    --persist "$CONF_DIR/waterwall-cpu.variant" --installed /usr/local/bin/waterwall \
+    | "$PYTHON_BIN" -c 'import json,sys; print("1" if json.load(sys.stdin)["skip_download"] else "0")')"
+  if [[ "$skip" == 1 ]]; then
+    log "WaterWall ${WW_VERSION} (${variant}) installed ELF OK; skip download"
   else
     dir="$(mktemp -d)"
     log "downloading WaterWall ${WW_VERSION} (${variant}, ${asset})"
     curl -fsSL --retry 3 -o "$dir/ww.zip" "$url"
     actual="$(sha256sum "$dir/ww.zip" | awk '{print $1}')"
-    [[ "$actual" == "$expected" ]] || die "checksum mismatch for WaterWall (expected $expected, got $actual)"
+    [[ "$actual" == "$zip_expected" ]] || die "checksum mismatch for WaterWall zip (expected $zip_expected, got $actual)"
     unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
     install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
     record_binary_provenance waterwall /usr/local/bin/waterwall

@@ -902,7 +902,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--variant",
         choices=sorted(waterwall_binary.VARIANTS),
         default="auto",
-        help="auto: AVX2 probe + persisted choice + installed binary",
+        help="auto: AVX2 probe + persisted variant file (not installed ELF)",
     )
     wwb_plan.add_argument(
         "--persist",
@@ -915,13 +915,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="record resolved variant on disk",
     )
-    wwb_plan.add_argument(
+    wwb_plan.add_argument("--cpuinfo", type=Path, help="override /proc/cpuinfo for tests")
+    wwb_skip = wwb_sub.add_parser(
+        "skip-download",
+        help="true when persisted variant matches and installed ELF verifies (JSON)",
+    )
+    wwb_skip.add_argument("--arch", choices=["x64", "arm64"], required=True)
+    wwb_skip.add_argument("--variant", choices=["standard", "old-cpu"], required=True)
+    wwb_skip.add_argument("--persist", type=Path, default=waterwall_binary.PERSIST_DEFAULT)
+    wwb_skip.add_argument(
         "--installed",
         type=Path,
         default=Path("/usr/local/bin/waterwall"),
-        help="existing binary to detect manual old-cpu installs",
     )
-    wwb_plan.add_argument("--cpuinfo", type=Path, help="override /proc/cpuinfo for tests")
 
     tsign = sub.add_parser(
         "tactics-sign",
@@ -2099,6 +2105,15 @@ def _run(args: argparse.Namespace) -> int:
         return _run_waterwall(args, out)
 
     if args.command == "waterwall-binary":
+        if args.ww_binary_action == "skip-download":
+            ok = waterwall_binary.should_skip_waterwall_download(
+                arch=args.arch,
+                variant=args.variant,
+                persist_path=args.persist,
+                installed=args.installed,
+            )
+            out.write(json.dumps({"skip_download": ok}) + "\n")
+            return 0
         if args.ww_binary_action != "plan":
             raise ConfigError("unknown waterwall-binary action")
         cpuinfo = None
@@ -2108,19 +2123,19 @@ def _run(args: argparse.Namespace) -> int:
             arch=args.arch,
             requested=args.variant,
             persist_path=args.persist,
-            installed_binary=args.installed,
             cpuinfo_text=cpuinfo,
         )
         if args.write_persist:
             waterwall_binary.persist_cpu_variant(variant, args.persist)
-        asset, sha = waterwall_binary.variant_for_asset(args.arch, variant)
+        asset, zip_sha, elf_sha = waterwall_binary.variant_for_asset(args.arch, variant)
         base = f"https://github.com/radkesvat/WaterWall/releases/download/{waterwall_binary.WW_VERSION}"
         payload = {
             "version": waterwall_binary.WW_VERSION,
             "arch": args.arch,
             "variant": variant,
             "asset": asset,
-            "sha256": sha,
+            "zip_sha256": zip_sha,
+            "elf_sha256": elf_sha or None,
             "url": f"{base}/{asset}",
         }
         out.write(json.dumps(payload, indent=2) + "\n")

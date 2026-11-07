@@ -44,9 +44,9 @@ sudo SHAHRAH_WHEELHOUSE=/opt/wheelhouse WW_CPU_VARIANT=old-cpu EXIT_PEER_IP=<NL_
   ./deploy/beta/iran-relay-install.sh
 ```
 
-On Xeon without AVX2, `auto` (default) also selects the official `*-gcc-x64-old-cpu` zip and
-persists the choice under `/etc/shahrah/waterwall-cpu.variant` so re-runs do not overwrite a
-working old-CPU binary.
+On Xeon without AVX2, `auto` selects the official `*-gcc-x64-old-cpu` zip (zip checksum verified
+on download). Re-runs skip download only when `/etc/shahrah/waterwall-cpu.variant` matches and the
+installed ELF matches the pinned **binary** digest (not the zip).
 
 Re-run is idempotent (re-downloads WaterWall if needed, restarts unit).
 
