@@ -29,7 +29,11 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../install.sh
 source "$DIR/../install.sh"
 
-[[ -f /etc/shahrah/state.json ]] || die "install exit node first"
+if [[ "${PANEL_OWNED:-0}" != 1 ]]; then
+  [[ -f /etc/shahrah/state.json ]] || die "install exit node first or set PANEL_OWNED=1"
+else
+  export WW_EXIT_SERVICE="${PANEL_EXIT_SERVICE:-127.0.0.1:443}"
+fi
 [[ "$(id -u)" -eq 0 ]] || die "run as root"
 
 self="$(ip -4 -o addr show dev "$(default_iface)" | awk '{split($4,a,"/"); print a[1]; exit}')"

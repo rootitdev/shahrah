@@ -66,7 +66,11 @@ bootstrap_shahrah_cli() {
     "$SHAHRAH_PYTHON" -m venv "$venv"
   fi
   pip_log="$(mktemp)"
-  if ! "$venv/bin/pip" install -q --upgrade "$SHAHRAH_SRC_DIR" >"$pip_log" 2>&1; then
+  local pip_install=(install -q --upgrade "$SHAHRAH_SRC_DIR")
+  if [[ -n "${SHAHRAH_WHEELHOUSE:-}" ]]; then
+    pip_install=(install -q --no-index --find-links "$SHAHRAH_WHEELHOUSE" "$SHAHRAH_SRC_DIR")
+  fi
+  if ! "$venv/bin/pip" "${pip_install[@]}" >"$pip_log" 2>&1; then
     printf 'error: نصب بسته از سورس شکست خورد (credentialها دست‌نخورده).\n' >&2
     tail -n 5 "$pip_log" >&2
     rm -f "$pip_log"

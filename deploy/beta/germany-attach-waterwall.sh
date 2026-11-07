@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Attach WaterWall exit leg to an existing Shahrah node (beta phase 2). Does not touch Xray state.
 #
-# Prereqs: shahrah-xray active, /etc/shahrah/state.json present, Iran relay IP known.
+# Prereqs (standalone Shahrah exit): state.json present. For PasarGuard-owned :443 use
+# panel-exit-attach-waterwall.sh instead (no state.json).
 # Generates /etc/shahrah/backhaul.key on first run — copy to Iran before enabling Iran relay.
 #
 # Usage (on Germany exit):
@@ -19,7 +20,12 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=../install.sh
 source "$DIR/../install.sh"
 
-[[ -f /etc/shahrah/state.json ]] || die "missing /etc/shahrah/state.json — install exit node first"
+PANEL_OWNED="${PANEL_OWNED:-0}"
+if [[ "$PANEL_OWNED" != 1 ]]; then
+  [[ -f /etc/shahrah/state.json ]] || die "missing state.json — use panel-exit-attach-waterwall.sh for panel nodes"
+else
+  export WW_EXIT_SERVICE="${PANEL_EXIT_SERVICE:-127.0.0.1:443}"
+fi
 [[ "$(id -u)" -eq 0 ]] || die "run as root"
 
 export ROLE=node WW_SIDE=exit WW_PEER="$IRAN_PEER_IP" WW_MODE="${WW_MODE:-reverse}"
