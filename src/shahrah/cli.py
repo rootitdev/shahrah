@@ -1847,9 +1847,7 @@ def _run(args: argparse.Namespace) -> int:
                 out.write(report.to_json())
                 return 0
             title = (
-                f"وضعیت: {report.install_state}"
-                if args.fa
-                else f"status: {report.install_state}"
+                f"وضعیت: {report.install_state}" if args.fa else f"status: {report.install_state}"
             )
             out.write(title + "\n")
             out.write(f"source={report.source_revision} cli={report.installed_cli_revision}\n")
