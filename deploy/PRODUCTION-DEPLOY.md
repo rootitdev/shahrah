@@ -1,7 +1,7 @@
 # Production control plane (main branch) — ops worker
 
 **Sources of truth:** `github.com/rootitdev/shahrah` **main** only.  
-**Targets (owner):** Netherlands exit `185.19.33.221`, Iran relay `87.107.110.162`.  
+**Targets (owner):** Netherlands exit `<NL_IPV4>`, Iran relay `<IRAN_IPV4>` (values in ops vault, not git).  
 **Domain (parent + Cloudflare):** `bluelark.ir` — DNS/TLS changes are **parent** only (not automated here).
 
 ## Role separation
@@ -19,9 +19,9 @@ PasarGuard install: use the **official** upstream release/install path from [Pas
 
 | Name | Type | Points to | Purpose |
 |------|------|-----------|---------|
-| `reality.bluelark.ir` (example) | A/AAAA | NL `185.19.33.221` | REALITY client SNI/host |
+| `reality.bluelark.ir` (example) | A/AAAA | `<NL_IPV4>` | REALITY client SNI/host |
 | `panel.bluelark.ir` (example) | A or CNAME via CF | NL | PasarGuard UI + API `https://panel...:443` or `:8000` |
-| Iran IP | A | `87.107.110.162` | Relay front; subscription links use `client-host` / multi-exit ports per `docs/beta/BETA-OPS-RUNBOOK-fa.md` |
+| Iran IP | A | `<IRAN_IPV4>` | Relay front; subscription links use `client-host` / multi-exit ports per `deploy/beta/BETA-OPS-RUNBOOK-fa.md` |
 
 **Blocked until parent:** public CA cert for panel subscription URLs, exact subdomain names, Cloudflare proxy mode for REALITY (usually DNS-only on exit IP).
 
