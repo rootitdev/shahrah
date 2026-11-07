@@ -86,6 +86,18 @@ install_stage_fail() {
   exit 1
 }
 
+# Beta scripts source this file without main(); bootstrap CLI from git before new subcommands.
+ensure_shahrah_cli() {
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="${PYTHON_BIN:-python3}"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  if resolve_shahrah_cli 2>/dev/null; then
+    export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+    return 0
+  fi
+  bootstrap_shahrah_cli && export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh --host HOST [options]      (VPN exit/entry node)
@@ -295,6 +307,7 @@ install_xray() {
 record_binary_provenance() {
   local kind="$1" path="$2" sha utc
   [[ -f "$path" ]] || return 0
+  ensure_shahrah_cli 2>/dev/null || true
   sha="$(sha256sum "$path" | awk '{print $1}')"
   utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   if shahrah_cli record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null 2>&1; then
@@ -516,6 +529,7 @@ install_warp() {
 }
 
 install_waterwall() {
+  ensure_shahrah_cli || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
   local arch expected actual dir self service="127.0.0.1:${PORT}" iran_ip exit_ip
   arch="$(arch_suffix)"
   if [[ "$arch" == amd64 ]]; then arch="x64"; expected="$WW_SHA256_X64"; else expected="$WW_SHA256_ARM64"; fi
@@ -646,6 +660,7 @@ setup_user_and_dirs() {
 }
 
 init_node() {
+  ensure_shahrah_cli || die "CLI bootstrap failed"
   local state="$CONF_DIR/state.json" extra=() spec
   [[ "$PORT" == "443" || "$PORT" == "80" || "$PORT" == "53" ]] || extra+=(--allow-non-443)
   for spec in "${EXTRA_LISTENERS[@]}"; do

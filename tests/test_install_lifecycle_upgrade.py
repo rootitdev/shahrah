@@ -33,6 +33,10 @@ def test_install_orders_bootstrap_before_xray() -> None:
     main = text[text.index("main() {") :]
     assert main.index("install_app") < main.index("install_xray")
     assert 'relay|brain) log "skipping Xray download' in text
+    assert "ensure_shahrah_cli" in text
+    assert "install_waterwall()" in text
+    ww = text[text.index("install_waterwall() {") : text.index("install_relay() {")]
+    assert ww.index("ensure_shahrah_cli") < ww.index("downloading WaterWall")
 
 
 def test_stale_system_cli_bootstrap_from_source(tmp_path: Path) -> None:
