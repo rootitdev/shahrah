@@ -7,8 +7,8 @@
 ## نصب سریع
 
 ```bash
-git clone https://github.com/${GITHUB_OWNER}/vpn-infra.git
-cd vpn-infra/scripts/ig-mult-web
+git clone https://github.com/rootitdev/shahrah.git
+cd shahrah/deploy/panels/ig-mult-web
 sudo bash install.sh
 ```
 

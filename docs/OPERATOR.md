@@ -1,5 +1,7 @@
 # Operator runbook
 
+Pick **one** control plane: [CONTROL-PLANE.md](CONTROL-PLANE.md) (Shahrah brain *or* vpn-infra-kit failover, not both).
+
 End-to-end path to a lab or production Shahrah deployment. No real IPs/domains belong in git;
 substitute your own.
 

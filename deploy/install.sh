@@ -65,6 +65,7 @@ WW_TUNNEL_PORT="8443"
 WW_COVER_SNI="www.speedtest.net"
 WW_COVER_ADDR=""
 WORK_DIR=""
+PREINSTALL_SNAP="/var/lib/shahrah/preinstall.snapshot"
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -185,6 +186,34 @@ disable_resolved_stub() {
   systemctl restart systemd-resolved
 }
 
+preinstall_record_unit() {
+  local unit="$1" state="not-found"
+  systemctl list-unit-files "${unit}.service" &>/dev/null || return 0
+  if systemctl is-enabled "$unit" &>/dev/null; then
+    state="$(systemctl is-enabled "$unit")"
+  else
+    state="disabled"
+  fi
+  install -d -m 0700 -o root -g root /var/lib/shahrah
+  if [[ ! -f "$PREINSTALL_SNAP" ]]; then
+    printf '# Shahrah install.sh preinstall snapshot — %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      >"$PREINSTALL_SNAP"
+    chmod 0600 "$PREINSTALL_SNAP"
+  fi
+  if ! grep -q "^${unit}=" "$PREINSTALL_SNAP" 2>/dev/null; then
+    printf '%s=%s\n' "$unit" "$state" >>"$PREINSTALL_SNAP"
+  fi
+}
+
+enforce_control_plane() {
+  if [[ "${SHAHRAH_WITH_KIT_FAILOVER:-0}" == 1 ]]; then
+    die "SHAHRAH_WITH_KIT_FAILOVER=1 is incompatible with deploy/install.sh — use Shahrah brain OR vpn-infra-kit failover (docs/CONTROL-PLANE.md)"
+  fi
+  if [[ "${VPN_INFRA_KIT_ACTIVE:-0}" == 1 ]]; then
+    die "VPN_INFRA_KIT_ACTIVE=1 set — do not run shahrah node installer on a kit-managed exit"
+  fi
+}
+
 free_public_ports() {
   # A re-used VPS often still has nginx / an old Xray / a reverse proxy on 443/80/53.
   local port listener
@@ -202,6 +231,9 @@ free_public_ports() {
           ;;
       esac
       log "port ${port} is busy ($listener); stopping common leftovers (nginx, xray, caddy)"
+      for u in nginx xray caddy path-web; do
+        preinstall_record_unit "$u"
+      done
       systemctl stop nginx xray caddy path-web 2>/dev/null || true
       systemctl disable nginx xray caddy path-web 2>/dev/null || true
       break
@@ -685,6 +717,7 @@ setup_firewall() {
 
 main() {
   parse_args "$@"
+  enforce_control_plane
   check_system
   install_packages
   install_xray

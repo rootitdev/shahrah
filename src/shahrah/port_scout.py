@@ -38,7 +38,18 @@ SEED_TCP: tuple[int, ...] = (
     10444,
 )
 SEED_UDP: tuple[int, ...] = (
-    8443, 443, 500, 4500, 2408, 3478, 5349, 19302, 20000, 30000, 40000, 50000
+    8443,
+    443,
+    500,
+    4500,
+    2408,
+    3478,
+    5349,
+    19302,
+    20000,
+    30000,
+    40000,
+    50000,
 )
 
 Probe = Callable[[str, int, str, float], "ProbeResult"]  # host, port, proto, timeout
@@ -173,8 +184,10 @@ def udp_probe(host: str, port: int, proto: str, timeout_s: float) -> ProbeResult
 
 
 def default_probe(host: str, port: int, proto: str, timeout_s: float) -> ProbeResult:
-    return tcp_probe(host, port, proto, timeout_s) if proto == "tcp" else udp_probe(
-        host, port, proto, timeout_s
+    return (
+        tcp_probe(host, port, proto, timeout_s)
+        if proto == "tcp"
+        else udp_probe(host, port, proto, timeout_s)
     )
 
 
@@ -192,8 +205,7 @@ class PortBank:
 
     def upsert(self, cand: Candidate) -> PortBank:
         rest = tuple(
-            c for c in self.candidates
-            if not (c.port == cand.port and c.proto == cand.proto)
+            c for c in self.candidates if not (c.port == cand.port and c.proto == cand.proto)
         )
         return replace(self, candidates=(*rest, cand))
 

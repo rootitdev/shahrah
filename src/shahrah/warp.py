@@ -221,7 +221,7 @@ def hy2_acl_lines(settings: WarpSettings) -> list[str]:
     lines = []
     for suffix in WARP_DOMAIN_SUFFIXES:
         s = suffix.rstrip(".")
-        lines.append(f'    - warp(suffix:{s})')
+        lines.append(f"    - warp(suffix:{s})")
     return lines
 
 

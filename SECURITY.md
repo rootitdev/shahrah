@@ -11,7 +11,7 @@ Shahrah is designed so a public GitHub clone never contains deployment facts.
 ## Operator habits
 
 * Put secrets in `EnvironmentFile=` units (`brain.env`, `sub.env`), never on `ExecStart` argv
-* Rotate root / panel / sub path secrets after any paste into chat or tickets
+* Rotate root / panel / sub path secrets after any paste into chat or tickets (see [SECRET-ROTATION.md](docs/SECRET-ROTATION.md))
 * Keep `shahrah ops` and `serve-sub` on loopback; reach them over SSH tunnels
 * Enable access logs only when you need SNI watch / Instagram multiplier estimates
 

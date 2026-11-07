@@ -160,11 +160,9 @@ def check_server_config(config: dict[str, Any]) -> LeakCheckReport:
         isinstance(r, dict)
         and r.get("outboundTag") in {"block", "BLOCK"}
         and any(
-            str(ip).startswith("10.") or str(ip).startswith("127.")
-            for ip in (r.get("ip") or [])
+            str(ip).startswith("10.") or str(ip).startswith("127.") for ip in (r.get("ip") or [])
         )
         for r in rules
     )
     _add(report, "private_ranges_blocked", private_blocked, "")
     return report
-

@@ -199,7 +199,6 @@ def render_server_config(
             raise TypeError("ss2022 must be Ss2022Settings")
         inbounds.append(ss_inbound(ss2022, list(users)))
     if server.stats_api_port is not None:
-
         inbounds.append(
             {
                 "tag": _API_INBOUND_TAG,

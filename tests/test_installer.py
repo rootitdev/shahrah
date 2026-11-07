@@ -108,7 +108,26 @@ def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str)
     service = text[text.index("install_service() {") : text.index("detect_ssh_port() {")]
     assert service.index("free_dns_port") < service.index("systemctl restart")
     assert "DNSStubListener=no" in text
-    assert "grep -v '\"xray\"'" in text  # re-running must not mistake our own Xray for a conflict
+    assert (
+        "grep -vE '\"xray\"|shahrah-xray'" in text
+    )  # re-running must not mistake our own Xray for a conflict
+    assert "preinstall_record_unit" in text
+    assert "enforce_control_plane" in text
+
+
+def test_beta_ops_scripts_are_syntactically_valid() -> None:
+    root = Path(__file__).resolve().parents[1]
+    scripts = (
+        "deploy/beta/germany-attach-waterwall.sh",
+        "deploy/beta/iran-relay-install.sh",
+        "deploy/beta/migrate-exit-public-ip.sh",
+        "deploy/beta/firewall-germany-beta.sh",
+        "deploy/beta/firewall-iran-relay.sh",
+        "scripts/backup-shahrah-bundle.sh",
+        "scripts/restore-shahrah-drill.sh",
+    )
+    for rel in scripts:
+        subprocess.run(["bash", "-n", str(root / rel)], check=True)
 
 
 ARP = (

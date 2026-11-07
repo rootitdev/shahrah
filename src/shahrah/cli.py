@@ -1327,7 +1327,6 @@ def _parse_hop(text: str) -> tuple[int, int] | None:
     return int(low), int(high)
 
 
-
 def _run_warp(args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO) -> int:
     """Enable/disable Cloudflare WARP egress and render the wg-quick profile."""
     if args.action == "enable":
@@ -2173,6 +2172,7 @@ def _port_scout(args: argparse.Namespace, out: TextIO) -> int:
         out.write(f"assigned {args.proto}/{args.port} -> {args.label}\n")
         return 0
     raise ConfigError(f"unknown port-scout command {cmd!r}")
+
 
 def _run_ss2022(args: argparse.Namespace, state_path: Path, state: NodeState, out: TextIO) -> int:
     from . import shadowsocks as ss
