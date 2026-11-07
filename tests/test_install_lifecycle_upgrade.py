@@ -91,9 +91,7 @@ def test_readonly_cli_never_creates_venv(tmp_path: Path) -> None:
     fake_bin.mkdir()
     stale = fake_bin / "shahrah"
     stale.write_text(
-        "#!/usr/bin/env bash\n"
-        'echo "invalid choice record-provenance" >&2\n'
-        "exit 2\n",
+        '#!/usr/bin/env bash\necho "invalid choice record-provenance" >&2\nexit 2\n',
         encoding="utf-8",
     )
     stale.chmod(0o755)
