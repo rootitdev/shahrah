@@ -1,4 +1,7 @@
-"""Two named peers must render distinct configs (unit); WW binary e2e stays in test_waterwall_e2e."""
+"""Two named peers render distinct configs (unit).
+
+WW multi-instance binary e2e: optional via SHAHRAH_WW_BIN in test_waterwall_e2e.
+"""
 
 from __future__ import annotations
 

@@ -278,9 +278,7 @@ def record_provenance_json(path: Path, kind: str, sha256: str, installed_utc: st
     entries = load_provenance(PROVENANCE_PATH)
     entries = [e for e in entries if e.path != path]
     entries.append(
-        BinaryProvenanceEntry(
-            path=path, kind=kind, sha256=sha256, installed_utc=installed_utc
-        )
+        BinaryProvenanceEntry(path=path, kind=kind, sha256=sha256, installed_utc=installed_utc)
     )
     payload = {"entries": [e.__dict__ for e in entries]}
     PROVENANCE_PATH.parent.mkdir(parents=True, exist_ok=True)

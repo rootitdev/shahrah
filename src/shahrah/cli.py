@@ -1726,9 +1726,7 @@ def _run_relay(args: argparse.Namespace, out: TextIO) -> int:
             out.write(f"wrote {args.unit_file}\n")
         out.write(f"ufw allow {peer.user_port}/tcp\n")
         if peer.mode == "reverse":
-            out.write(
-                f"ufw allow from {peer.exit_ip} to any port {peer.tunnel_port} proto tcp\n"
-            )
+            out.write(f"ufw allow from {peer.exit_ip} to any port {peer.tunnel_port} proto tcp\n")
         out.write("systemctl daemon-reload\n")
         out.write(f"systemctl enable --now shahrah-waterwall@{args.name}\n")
         out.write(
