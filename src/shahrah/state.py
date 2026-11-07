@@ -258,11 +258,7 @@ class NodeState:
         return Endpoint(
             name=f"{prefix}-cdn-{listener.port}",
             host=listener.cdn_host,
-            port=(
-                listener.edge_port
-                if listener.edge_port
-                else (443 if listener.edge_tls else 80)
-            ),
+            port=(listener.edge_port if listener.edge_port else (443 if listener.edge_tls else 80)),
             profile=listener.profile,
             sni=listener.cdn_host if listener.edge_tls else "",
             tls=listener.edge_tls,
@@ -294,6 +290,10 @@ class NodeState:
         if client_host:
             validate_host(client_host, "client host")
         return replace(self, client_host=client_host)
+
+    def with_public_host(self, public_host: str) -> NodeState:
+        validate_host(public_host, "public host")
+        return replace(self, public_host=public_host)
 
     def with_target(self, target_host: str) -> NodeState:
         """Point REALITY at a different TLS 1.3 site (the public SNI clients dial)."""

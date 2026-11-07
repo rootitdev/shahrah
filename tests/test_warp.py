@@ -178,4 +178,3 @@ def test_ipv4_only_pins_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
     pinned = ipv4_only(settings)
     assert pinned.address_v6 == ""
     assert pinned.endpoint == "203.0.113.9:2408"
-

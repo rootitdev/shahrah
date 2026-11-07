@@ -30,6 +30,9 @@ warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 [[ "$(id -u)" -eq 0 ]] || die "run as root (sudo)"
+if [[ "${SHAHRAH_BETA:-0}" == 1 ]]; then
+  warn "SHAHRAH_BETA=1: sales panels (settle/ig) are not recommended; use PANELS= or PANELS=watch only"
+fi
 [[ -d "$PANELS_DIR/lib" ]] || die "missing $PANELS_DIR (vendored panels)"
 
 PANEL_BASE="${PANEL_BASE:-}"

@@ -749,7 +749,10 @@ def _public_panel_base(req_host: str = "", forwarded_proto: str = "") -> str:
     if host and "127.0.0.1" not in host and "localhost" not in host:
         proto = (forwarded_proto or "https").split(",")[0].strip() or "https"
         return f"{proto}://{host}"
-    return "https://panel.jetengine.ir:2096"
+    raise RuntimeError(
+        "PANEL_BASE must be set in /root/.vpn-secrets/settle-web.env or "
+        "/etc/settle-web/panel.env (no hardcoded production panel URL)"
+    )
 
 
 def _panel_api_key() -> str:

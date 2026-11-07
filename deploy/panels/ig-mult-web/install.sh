@@ -68,8 +68,9 @@ if [[ -f "$DIR/../bin/instagram-multiplier" ]]; then
   install -m 644 "$DIR/../bin/instagram_multiplier.py" /usr/local/lib/instagram-multiplier/
 elif [[ -f "$REPO_ROOT/scripts/instagram-multiplier" ]]; then
   install -m 755 "$REPO_ROOT/scripts/instagram-multiplier" /usr/local/sbin/instagram-multiplier
-elif [[ -f /root/vpn-infra/scripts/instagram-multiplier ]]; then
-  install -m 755 /root/vpn-infra/scripts/instagram-multiplier /usr/local/sbin/instagram-multiplier
+else
+  echo "instagram-multiplier not found under deploy/panels/bin/" >&2
+  exit 1
 fi
 
 export PANEL_CFG="$ETC/config.env"

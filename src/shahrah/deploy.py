@@ -209,6 +209,11 @@ def ufw_commands(*, ssh_port: int, public_ports: Iterable[int]) -> list[str]:
     return commands
 
 
+def ufw_delete_public_ports(public_ports: Iterable[int]) -> list[str]:
+    """Remove only shahrah-published TCP allows (idempotent ``ufw delete``)."""
+    return [f"ufw delete allow {port}/tcp" for port in sorted(set(public_ports))]
+
+
 def sysctl_conf() -> str:
     """Kernel settings for thousands of TCP flows; BBR helps lossy international links."""
     return """# Managed by shahrah

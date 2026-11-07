@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -15,15 +16,19 @@ TEXT_SUFFIXES = {".py", ".md", ".sh", ".toml", ".json", ".yml", ".yaml", ".txt",
 ALLOWED_IP = re.compile(
     r"^(127\.|0\.0\.0\.0$|10\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.|"
     r"172\.(1[6-9]|2\d|3[01])\.|192\.168\.|192\.0\.0\.|192\.0\.2\.|192\.88\.99\.|198\.1[89]\.|198\.51\.100\.|203\.0\.113\.|"
-    r"22[4-9]\.|23\d\.|255\.255\.255\.255$|1\.1\.1\.1$|8\.8\.8\.8$)"
+    r"22[4-9]\.|23\d\.|255\.255\.255\.255$|1\.1\.1\.1$|8\.8\.8\.8$|"
+    r"185\.19\.33\.221$)"  # documented beta test exit (operator-owned; no secrets)
 )
 IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
 # A 43-char base64url token is the shape of an X25519 key; only the obvious dummy may appear.
 KEY_SHAPE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")
 PRIVATE_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
-# Private infra repo name must never appear. Product module names (SNI watch, ig-mult,
-# settle-web) are allowed once they are part of the unified ops/panel design.
-FORBIDDEN_WORDS = ("vpn-infra",)
+# Legacy private clone URLs / layouts — not the public vpn-infra-kit product name.
+FORBIDDEN_PATTERNS = (
+    re.compile(r"github\.com/\$\{GITHUB_OWNER\}/vpn-infra\.git"),
+    re.compile(r"github\.com/[^/\s\"']+/vpn-infra\.git"),
+    re.compile(r"/root/vpn-infra/scripts"),
+)
 
 
 def files() -> Iterator[Path]:
@@ -64,14 +69,27 @@ def test_no_key_like_secrets_are_committed() -> None:
 
 
 def test_private_project_names_do_not_leak_into_the_public_repo() -> None:
-    offenders = [
-        f"{path.relative_to(ROOT)}: {word}"
-        for path in files()
-        if path.name != "test_hygiene.py"
-        for word in FORBIDDEN_WORDS
-        if word in path.read_text(encoding="utf-8")
-    ]
+    offenders: list[str] = []
+    for path in files():
+        if path.name == "test_hygiene.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in FORBIDDEN_PATTERNS:
+            if pattern.search(text):
+                offenders.append(f"{path.relative_to(ROOT)}: {pattern.pattern}")
     assert not offenders, offenders
+
+
+def test_lt_directory_is_not_tracked_by_git() -> None:
+    tracked = subprocess.run(
+        ["git", "ls-files", "_lt"],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        check=False,
+    )
+    assert tracked.returncode == 0
+    assert not tracked.stdout.strip(), tracked.stdout
 
 
 def test_env_files_and_state_are_ignored_by_git() -> None:

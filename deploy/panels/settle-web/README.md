@@ -9,8 +9,8 @@
 روی سرور مقصد با دسترسی root:
 
 ```bash
-git clone https://github.com/${GITHUB_OWNER}/vpn-infra.git
-cd vpn-infra/scripts/settle-web
+git clone https://github.com/rootitdev/shahrah.git
+cd shahrah/deploy/panels/settle-web
 sudo bash install.sh
 ```
 
@@ -26,7 +26,7 @@ sudo PANEL_BASE='https://panel.example.com:2096' AUTH_USER=settle AUTH_PASS='ر�
 آپدیت بعدی (همان ریپو):
 
 ```bash
-cd /path/to/vpn-infra && git pull
+cd /path/to/shahrah && git pull
 sudo bash scripts/settle-web/install.sh
 # یا اگر قبلاً نصب شده و می‌خواهید همان رمز بماند: فقط Enter روی پرامپت‌ها
 ```

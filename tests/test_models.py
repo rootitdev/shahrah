@@ -141,8 +141,9 @@ def test_reality_xhttp_rejects_root_path_that_collides_with_cover(reality: Reali
 
 
 def test_plain_ws_listener_requires_unguessable_path() -> None:
-    from shahrah.models import ConfigError, Listener, Profile
     import pytest
+
+    from shahrah.models import ConfigError, Listener, Profile
 
     Listener(80, Profile.PLAIN_WS, ws_path="/shahrah-ws", ws_host="static.jetengine.ir")
     with pytest.raises(ConfigError):

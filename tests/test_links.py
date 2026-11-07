@@ -72,8 +72,8 @@ def test_encode_subscription_is_plain_base64() -> None:
 
 
 def test_plain_ws_link_uses_domain_and_host_header() -> None:
-    from shahrah.models import Endpoint, Profile, User
     from shahrah.links import vless_link
+    from shahrah.models import Endpoint, Profile, User
 
     ep = Endpoint(
         name="main-ws-80",

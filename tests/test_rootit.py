@@ -98,7 +98,7 @@ def test_config_roundtrip(tmp_path: Path) -> None:
 def test_resolve_subscription_uses_pasarguard_client(tmp_path: Path) -> None:
     calls: list[tuple[str, str]] = []
 
-    def transport(method: str, url: str, headers, body):  # noqa: ANN001
+    def transport(method: str, url: str, headers, body):
         calls.append((method, url))
         assert headers.get("X-Api-Key") == "test-key"
         assert url.endswith("/api/user/ali")
@@ -138,7 +138,7 @@ def test_mysub_emergency_no_password(tmp_path: Path, monkeypatch) -> None:
     rootit.save_config(cfg_path, cfg)
     monkeypatch.setenv("SHAHRAH_PANEL_API_KEY", "k" * 32)
 
-    def transport(method: str, url: str, headers, body):  # noqa: ANN001
+    def transport(method: str, url: str, headers, body):
         return 200, {
             "username": "ali",
             "status": "active",
@@ -157,7 +157,7 @@ def test_mysub_emergency_no_password(tmp_path: Path, monkeypatch) -> None:
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        body = "username=ali".encode()
+        body = b"username=ali"
         req = Request(
             f"http://127.0.0.1:{port}/mysub",
             data=body,
