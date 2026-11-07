@@ -22,7 +22,6 @@ _HERE = Path(__file__).resolve().parent
 for _p in (
     _HERE,
     Path("/usr/local/lib/instagram-multiplier"),
-    Path("/root/vpn-infra/scripts"),
 ):
     if (_p / "instagram_multiplier.py").is_file():
         sys.path.insert(0, str(_p))
@@ -48,7 +47,7 @@ from instagram_multiplier import (  # noqa: E402
 USERS_FILE = Path("/etc/vpn-monitor/instagram-multiplier-users.txt")
 PAUSED_FILE = Path("/etc/vpn-monitor/instagram-multiplier-paused.txt")
 STATS_LOG = Path("/var/log/vpn-path/stats.log")
-EXPORT = Path("/root/vpn-infra/scripts/iran_sync_export.py")
+EXPORT = Path("/usr/local/sbin/iran_sync_export.py")
 CONTAINER = "pasarguard"
 LOCK_FILE = USERS_FILE.parent / ".instagram-multiplier-users.lock"
 PAUSED_LOCK = USERS_FILE.parent / ".instagram-multiplier-paused.lock"

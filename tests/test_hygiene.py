@@ -21,9 +21,12 @@ IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.])")
 # A 43-char base64url token is the shape of an X25519 key; only the obvious dummy may appear.
 KEY_SHAPE = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")
 PRIVATE_BLOCK = re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")
-# Private infra repo name must never appear. Product module names (SNI watch, ig-mult,
-# settle-web) are allowed once they are part of the unified ops/panel design.
-FORBIDDEN_WORDS = ("vpn-infra",)
+# Legacy private clone URLs / layouts — not the public vpn-infra-kit product name.
+FORBIDDEN_PATTERNS = (
+    re.compile(r"github\.com/\$\{GITHUB_OWNER\}/vpn-infra\.git"),
+    re.compile(r"github\.com/[^/\s\"']+/vpn-infra\.git"),
+    re.compile(r"/root/vpn-infra/scripts"),
+)
 
 
 def files() -> Iterator[Path]:
@@ -64,13 +67,14 @@ def test_no_key_like_secrets_are_committed() -> None:
 
 
 def test_private_project_names_do_not_leak_into_the_public_repo() -> None:
-    offenders = [
-        f"{path.relative_to(ROOT)}: {word}"
-        for path in files()
-        if path.name != "test_hygiene.py"
-        for word in FORBIDDEN_WORDS
-        if word in path.read_text(encoding="utf-8")
-    ]
+    offenders: list[str] = []
+    for path in files():
+        if path.name == "test_hygiene.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in FORBIDDEN_PATTERNS:
+            if pattern.search(text):
+                offenders.append(f"{path.relative_to(ROOT)}: {pattern.pattern}")
     assert not offenders, offenders
 
 

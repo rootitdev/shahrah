@@ -743,7 +743,7 @@ sudo AUTH_USER=watch AUTH_PASS='رمز-دلخواه' ./install.sh</pre>
 
 <h2>فایل‌های داخل بسته (مخزن)</h2>
 <table>
-<tr><th>مسیر در vpn-infra</th><th>نقش</th></tr>
+<tr><th>مسیر در shahrah/deploy/panels</th><th>نقش</th></tr>
 <tr><td class="path">scripts/sni-watch/app.py</td><td>جمع‌آور لاگ + صفحهٔ وب</td></tr>
 <tr><td class="path">scripts/sni-watch/install.sh</td><td>نصب مستقل روی یک سرور</td></tr>
 <tr><td class="path">scripts/sni-watch/adult-domains.txt</td><td>فهرست دامنهٔ بزرگسال</td></tr>

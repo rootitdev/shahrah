@@ -8,8 +8,8 @@
 ## نصب سریع
 
 ```bash
-git clone https://github.com/${GITHUB_OWNER}/vpn-infra.git
-cd vpn-infra/scripts/sni-watch
+git clone https://github.com/rootitdev/shahrah.git
+cd shahrah/deploy/panels/sni-watch
 sudo bash install.sh
 ```
 

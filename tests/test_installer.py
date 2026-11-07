@@ -108,7 +108,7 @@ def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str)
     service = text[text.index("install_service() {") : text.index("detect_ssh_port() {")]
     assert service.index("free_dns_port") < service.index("systemctl restart")
     assert "DNSStubListener=no" in text
-    assert "grep -v '\"xray\"'" in text  # re-running must not mistake our own Xray for a conflict
+    assert 'grep -vE \'"xray"|shahrah-xray\'' in text  # re-running must not mistake our own Xray for a conflict
 
 
 ARP = (

@@ -26,10 +26,7 @@ LOGIN_MAX = 12
 DOM_RE = re.compile(
     r"^(geosite|full|domain|keyword|regexp|ext):[A-Za-z0-9._*:/?+-]+$"
 )
-CLI_CANDIDATES = (
-    Path("/root/vpn-infra/scripts/instagram-multiplier"),
-    Path("/usr/local/sbin/instagram-multiplier"),
-)
+CLI_CANDIDATES = (Path("/usr/local/sbin/instagram-multiplier"),)
 
 _lock = threading.RLock()
 _export_lock = threading.Lock()
@@ -633,7 +630,7 @@ instagram-multiplier remove &lt;username&gt;
 instagram-multiplier list
 instagram-multiplier stats
 instagram-multiplier stats --days 7</pre>
-<p>نصب مجدد UI: <code>sudo AUTH_USER=ig AUTH_PASS='...' /root/vpn-infra/scripts/ig-mult-web/install.sh</code></p>
+<p>نصب مجدد UI: <code>sudo PANEL_BASE=... AUTH_USER=ig AUTH_PASS='...' deploy/panels/ig-mult-web/install.sh</code></p>
 </article>
 </div>
 </div>
