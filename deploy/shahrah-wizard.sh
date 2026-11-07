@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
-# Interactive terminal wizard (Persian). Non-TTY: use deploy/install.sh flags directly.
+# Interactive wizard — Persian status, bootstrap-safe CLI.
 set -Eeuo pipefail
 
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="${SHAHRAH_APP_DIR:-/opt/shahrah}"
+# shellcheck source=lib/shahrah-cli.sh
+source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+
 INSTALL="$SRC_DIR/deploy/install.sh"
 UNINSTALL="$SRC_DIR/deploy/uninstall-shahrah.sh"
 UPGRADE="$SRC_DIR/deploy/upgrade-shahrah.sh"
@@ -22,127 +26,100 @@ ok() { printf '%b%s%b\n' "$C_OK" "$*" "$C_DIM"; }
 err() { printf '%b%s%b\n' "$C_ERR" "$*" "$C_DIM" >&2; }
 
 need_root() {
-  [[ "$(id -u)" -eq 0 ]] || { err "این ویزارد را با sudo اجرا کنید."; exit 2; }
+  [[ "$(id -u)" -eq 0 ]] || { err "با sudo اجرا کنید."; return 1; }
+  return 0
+}
+
+show_status() {
+  if ! resolve_shahrah_cli 2>/dev/null; then
+    err "CLI قدیمی — ابتدا: sudo $INSTALL --host ... --target ..."
+    return 1
+  fi
+  shahrah_cli lifecycle status --fa --src-root "$SRC_DIR" || return 1
+  return 0
+}
+
+run_install() {
+  local host target target_d mp=()
+  if [[ -f "$STATE" ]]; then
+    say "state موجود است — host/target فقط با تأیید عوض می‌شود."
+    printf 'HOST/TARGET جدید؟ [y/N]: '
+    read -r ch
+    if [[ ! "$ch" =~ ^[Yy] ]]; then
+      host="$(python3 -c "import json;print(json.load(open('$STATE'))['public_host'])")"
+      target="$(python3 -c "import json;print(json.load(open('$STATE'))['target_host'])")"
+    else
+      printf 'HOST: '; read -r host
+      printf 'TARGET [www.cloudflare.com]: '; read -r target
+      target="${target:-www.cloudflare.com}"
+    fi
+  else
+    printf 'HOST: '; read -r host
+    printf 'TARGET [www.cloudflare.com]: '; read -r target
+    target="${target:-www.cloudflare.com}"
+  fi
+  printf 'multi-port 53 (تأثیر DNS)؟ [y/N]: '
+  read -r m; [[ "$m" =~ ^[Yy] ]] && mp=(--multi-port)
+  printf 'ادامه نصب؟ [y/N]: '
+  read -r c
+  [[ "$c" =~ ^[Yy] ]] || return 0
+  set +e
+  "$INSTALL" --host "$host" --target "${target:-www.cloudflare.com}" "${mp[@]}"
+  local rc=$?
+  set -e
+  if [[ "$rc" -eq 0 ]]; then ok "نصب تمام شد."; else err "نصب ناموفق (کد $rc) — سرویس قبلی معمولاً فعال می‌ماند."; fi
+  show_status || true
+}
+
+run_uninstall_preview() {
+  say "پیش‌نمایش حذف — هیچ فایلی پاک نمی‌شود."
+  set +e
+  "$UNINSTALL" --dry-run
+  local rc=$?
+  set -e
+  [[ "$rc" -eq 0 ]] || err "پیش‌نمایش ناموفق — CLI را از سورس به‌روز کنید."
 }
 
 menu() {
-  say "━━ شاهراه — ویزارد ━━"
+  say "━━ شاهراه ━━"
+  show_status 2>/dev/null || say "(وضعیت: CLI نیاز به bootstrap دارد)"
   printf '%s\n' \
-    "  1) نصب / ارتقای خروج (exit)" \
-    "  2) نقش رله ایران (WaterWall؛ بدون نصب Xray جدید)" \
-    "  3) خروج نام‌گذاری‌شده (multi-exit)" \
-    "  4) وضعیت" \
-    "  5) توقف سرویس‌ها (حفظ state)" \
-    "  6) پیش‌نمایش حذف" \
-    "  7) ارتقا از git در /opt/shahrah" \
-    "  8) خروج"
+    "  1) خلاصه وضعیت (همین بالا)" \
+    "  2) نصب / ارتقا خروج" \
+    "  3) رله WaterWall" \
+    "  4) پیش‌نمایش حذف (فقط خواندن)" \
+    "  5) توقف سرویس (state می‌ماند)" \
+    "  6) خروج"
   printf '> '
   read -r choice
   case "$choice" in
-    1) wizard_exit ;;
-    2) wizard_relay ;;
-    3) wizard_peers ;;
-    4) wizard_status ;;
-    5) "$UNINSTALL" --yes ;;
-    6) "$UNINSTALL" --dry-run ;;
-    7) "$UPGRADE" ;;
-    8) exit 0 ;;
+    1) show_status || true; menu ;;
+    2) run_install; menu ;;
+    3)
+      printf 'EXIT_PEER_IP: '; read -r peer
+      printf 'ادامه؟ [y/N]: '; read -r c
+      [[ "$c" =~ ^[Yy] ]] || { menu; return; }
+      set +e
+      "$INSTALL" --role relay --ww-peer "$peer" --no-firewall
+      set -e
+      menu
+      ;;
+    4) run_uninstall_preview; menu ;;
+    5)
+      printf 'توقف سرویس‌های شاهراه؟ [y/N]: '
+      read -r c
+      [[ "$c" =~ ^[Yy] ]] && "$UNINSTALL" --yes --stop-only
+      menu
+      ;;
+    6) exit 0 ;;
     *) err "گزینه نامعتبر"; menu ;;
   esac
 }
 
-wizard_exit() {
-  say "نصب/ارتقای خروج (Xray + REALITY)"
-  if [[ -f "$STATE" ]]; then
-    say "state موجود — بدون تأیید، host/target عوض نمی‌شود."
-    printf 'HOST/TARGET جدید می‌خواهید؟ [y/N]: '
-    read -r ch
-    if [[ ! "$ch" =~ ^[Yy] ]]; then
-      exec "$INSTALL" --host "$(python3 -c "import json;print(json.load(open('$STATE'))['public_host'])")" \
-        --target "$(python3 -c "import json;print(json.load(open('$STATE'))['target_host'])")"
-    fi
-  fi
-  printf 'HOST: '
-  read -r host
-  printf 'TARGET [www.cloudflare.com]: '
-  read -r target
-  target="${target:-www.cloudflare.com}"
-  printf 'multi-port 53 (تأثیر DNS stub)؟ [y/N]: '
-  read -r mp
-  local extra=()
-  [[ "$mp" =~ ^[Yy] ]] && extra+=(--multi-port)
-  ok "پیش‌نمایش: host=$host target=$target ${extra[*]:-}"
-  printf 'ادامه؟ [y/N]: '
-  read -r c
-  [[ "$c" =~ ^[Yy] ]] || { menu; return; }
-  exec "$INSTALL" --host "$host" --target "$target" "${extra[@]}"
-}
-
-wizard_relay() {
-  say "رله ایران: WaterWall برای ورود داخلی؛ روی ایران Xray نصب/ارتقا نمی‌شود مگر قبلاً نصب شده باشد."
-  if [[ -f "$STATE" ]]; then
-    say "توجه: state.json از نصب قبلی هنوز روی دیسک است — این منو فقط --role relay اجرا می‌کند."
-  fi
-  printf 'EXIT_PEER_IP: '
-  read -r peer
-  ok "پیش‌نمایش: ww-peer=$peer (بدون تغییر host/target خروج)"
-  printf 'ادامه؟ [y/N]: '
-  read -r c
-  [[ "$c" =~ ^[Yy] ]] || { menu; return; }
-  exec "$INSTALL" --role relay --ww-peer "$peer" --no-firewall
-}
-
-wizard_peers() {
-  say "multi-exit — کلید جدا، پورت کاربر جدا، لینک جدا"
-  printf 'list | add | remove | activate: '
-  read -r op
-  case "$op" in
-    list) shahrah relay peer-list ;;
-    add)
-      printf 'NAME: '; read -r name
-      printf 'EXIT_IP: '; read -r exit_ip
-      printf 'USER_PORT [443]: '; read -r up; up="${up:-443}"
-      printf 'TUNNEL_PORT [8443]: '; read -r tp; tp="${tp:-8443}"
-      printf 'IRAN_IP: '; read -r iran
-      printf 'ENTRY_HOST: '; read -r entry; entry="${entry:-$iran}"
-      shahrah relay peer-add --name "$name" --exit-ip "$exit_ip" --user-port "$up" \
-        --tunnel-port "$tp" --iran-ip "$iran" --entry-host "$entry"
-      ok "کلید: /etc/shahrah/backhaul-${name}.key را به exit کپی کنید"
-      ;;
-    remove)
-      printf 'NAME: '; read -r name
-      printf 'حذف peer و پوشه WW؟ [y/N]: '
-      read -r c
-      [[ "$c" =~ ^[Yy] ]] || { menu; return; }
-      systemctl disable --now "shahrah-waterwall@${name}" 2>/dev/null || true
-      shahrah relay peer-remove --name "$name" --purge-dir
-      ;;
-    activate)
-      printf 'NAME: '; read -r name
-      shahrah relay peer-activate --name "$name"
-      printf 'دستورات ufw/systemctl بالا را اجرا کنید.\n'
-      ;;
-    *) err "نامعتبر" ;;
-  esac
-  printf '\n'
-  menu
-}
-
-wizard_status() {
-  for u in shahrah-xray shahrah-waterwall; do
-    if systemctl is-active --quiet "$u" 2>/dev/null; then ok "$u: active"; else say "$u: inactive"; fi
-  done
-  systemctl list-units 'shahrah-waterwall@*' --no-legend 2>/dev/null | while read -r line; do ok "$line"; done
-  systemctl list-units 'shahrah-waterwall-exit@*' --no-legend 2>/dev/null | while read -r line; do ok "$line"; done
-  [[ -f "$STATE" ]] && shahrah --state "$STATE" listener list 2>/dev/null || true
-  printf '\n'
-  menu
-}
-
 main() {
-  need_root
+  need_root || exit 2
   if [[ ! -t 0 ]]; then
-    err "TTY تعاملی نیست — از deploy/install.sh یا upgrade-shahrah.sh استفاده کنید."
+    err "TTY نیست —: sudo $INSTALL --host HOST --target www.cloudflare.com"
     exit 2
   fi
   menu

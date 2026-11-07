@@ -44,6 +44,7 @@ from . import (
     warp,
     waterwall,
 )
+from . import lifecycle as lifecycle_mod
 from . import soak as soakmod
 from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .install_flags import ReconfigurePlan, apply_plan
@@ -186,6 +187,22 @@ def _build_parser() -> argparse.ArgumentParser:
     prov.add_argument("--kind", required=True)
     prov.add_argument("--sha256", required=True)
     prov.add_argument("--utc", default="")
+
+    life = sub.add_parser("lifecycle", help="install/runtime status and CLI capability probes")
+    life_sub = life.add_subparsers(dest="life_command", required=True)
+    life_sub.add_parser("version", help="print lifecycle API version (JSON)")
+    lf_feat = life_sub.add_parser("has-feature", help="exit 0 if this build supports a command")
+    lf_feat.add_argument("--name", required=True)
+    life_sub.add_parser("probe", help="alias for version (bootstrap scripts)")
+    lf_stat = life_sub.add_parser("status", help="human or JSON install health summary")
+    lf_stat.add_argument("--json", action="store_true")
+    lf_stat.add_argument("--fa", action="store_true", help="Persian sentences")
+    lf_stat.add_argument(
+        "--xray-test",
+        action="store_true",
+        help="run xray -test on /etc/shahrah/xray.json if present",
+    )
+    lf_stat.add_argument("--src-root", type=Path, default=Path("/opt/shahrah"))
 
     apply = sub.add_parser("apply", help="render and validate the Xray server config")
     apply.add_argument("--config-out", type=Path, default=DEFAULT_XRAY_CONFIG)
@@ -1810,6 +1827,43 @@ def _run(args: argparse.Namespace) -> int:
         record_provenance_json(str(args.path), args.kind, args.sha256, utc)
         out.write(f"recorded provenance for {args.path}\n")
         return 0
+
+    if args.command == "lifecycle":
+        if args.life_command == "version" or args.life_command == "probe":
+            payload = {
+                "api": lifecycle_mod.LIFECYCLE_API,
+                "features": sorted(lifecycle_mod.KNOWN_FEATURES),
+            }
+            out.write(json.dumps(payload) + "\n")
+            return 0
+        if args.life_command == "has-feature":
+            return 0 if lifecycle_mod.has_feature(args.name) else 2
+        if args.life_command == "status":
+            report = lifecycle_mod.build_report(
+                src_root=args.src_root,
+                run_xray_test=bool(args.xray_test),
+            )
+            if args.json:
+                out.write(report.to_json())
+                return 0
+            title = (
+                f"وضعیت: {report.install_state}"
+                if args.fa
+                else f"status: {report.install_state}"
+            )
+            out.write(title + "\n")
+            out.write(f"source={report.source_revision} cli={report.installed_cli_revision}\n")
+            for port in report.listeners:
+                out.write(f"listener {port}\n")
+            lines = report.messages_fa if args.fa else report.next_steps
+            for line in lines:
+                out.write(f"  {line}\n")
+            if report.next_steps:
+                out.write("next:\n")
+                for step in report.next_steps:
+                    out.write(f"  → {step}\n")
+            return 0
+        raise ConfigError(f"unknown lifecycle command: {args.life_command}")
 
     if args.command == "uninstall-plan":
         manifest = default_manifest()

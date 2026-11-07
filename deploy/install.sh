@@ -78,6 +78,14 @@ trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+install_stage_fail() {
+  local stage="$1" detail="$2"
+  printf '\033[1;31merror [%s]:\033[0m %s\n' "$stage" "$detail" >&2
+  printf 'وضعیت فعلی: credentialها در /etc/shahrah معمولاً حفظ می‌شوند.\n' >&2
+  printf 'قدم بازیابی: cd %s && sudo ./deploy/install.sh --host ... --target ...\n' "$SRC_DIR" >&2
+  exit 1
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh --host HOST [options]      (VPN exit/entry node)
@@ -289,12 +297,11 @@ record_binary_provenance() {
   [[ -f "$path" ]] || return 0
   sha="$(sha256sum "$path" | awk '{print $1}')"
   utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  if command -v shahrah >/dev/null; then
-    shahrah record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null
-  else
-    PYTHONPATH="${SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
-      "from shahrah.ownership import record_provenance_json; record_provenance_json('$path','$kind','$sha','$utc')"
+  if shahrah_cli record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null 2>&1; then
+    return 0
   fi
+  PYTHONPATH="${SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -c \
+    "from shahrah.ownership import record_provenance_json; record_provenance_json('$path','$kind','$sha','$utc')"
 }
 
 # --- gateway discovery (paqet crafts Ethernet frames, so it needs the next hop's MAC) ------
@@ -620,10 +627,16 @@ install_paqet() {
 }
 
 install_app() {
-  log "installing shahrah from ${SRC_DIR} (with ${PYTHON_BIN})"
-  "$PYTHON_BIN" -m venv "$APP_DIR/venv"
-  "$APP_DIR/venv/bin/pip" install --quiet --upgrade "$SRC_DIR"
-  ln -sf "$APP_DIR/venv/bin/shahrah" /usr/local/bin/shahrah
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="$PYTHON_BIN"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  if ! bootstrap_shahrah_cli; then
+    die "نصب CLI از سورس ناموفق بود — سرویس/کلیدهای فعلی دست‌نخورده‌اند. cd ${SRC_DIR} && git status"
+  fi
+  log "CLI synced from source (lifecycle api OK)"
+  if [[ -x "$SHAHRAH_CLI" ]]; then
+    ln -sf "$SHAHRAH_CLI" /usr/local/bin/shahrah
+  fi
 }
 
 setup_user_and_dirs() {
@@ -770,9 +783,15 @@ main() {
   enforce_control_plane
   check_system
   install_packages
-  install_xray
-  install_app
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  install_app || install_stage_fail "bootstrap-cli" "نصب پایتون از سورس قبل از Xray"
   setup_user_and_dirs
+  case "$ROLE" in
+    relay|brain) log "skipping Xray download (role=$ROLE)" ;;
+    *) install_xray ;;
+  esac
   if [[ "$ROLE" == "brain" ]]; then
     install_brain
     return

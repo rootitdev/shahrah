@@ -7,7 +7,9 @@ from pathlib import Path
 
 import pytest
 
-SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "install.sh"
+ROOT = Path(__file__).resolve().parent.parent
+SCRIPT = ROOT / "deploy" / "install.sh"
+CLI_LIB = ROOT / "deploy" / "lib" / "shahrah-cli.sh"
 ATTACH = Path(__file__).resolve().parent.parent / "deploy" / "attach-domain.sh"
 ROOTIT = Path(__file__).resolve().parent.parent / "deploy" / "install-rootit.sh"
 UNINSTALL = Path(__file__).resolve().parent.parent / "deploy" / "uninstall-shahrah.sh"
@@ -59,7 +61,7 @@ def test_bash_accepts_the_syntax() -> None:
     bash = _find_bash()
     if bash is None:
         pytest.skip("bash not available")
-    for script in (SCRIPT, ATTACH, ROOTIT, UNINSTALL, WIZARD):
+    for script in (SCRIPT, ATTACH, ROOTIT, UNINSTALL, WIZARD, CLI_LIB):
         try:
             result = subprocess.run(
                 [bash, "-n", str(script)], capture_output=True, check=False, timeout=20
