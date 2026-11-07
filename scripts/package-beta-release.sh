@@ -38,6 +38,21 @@ fi
   sha256sum "${REL}.tar.gz" >"${REL}.sha256.manifest"
   [[ -f "${REL}-vpn-infra-kit-patched.tar.gz" ]] && sha256sum "${REL}-vpn-infra-kit-patched.tar.gz" >>"${REL}.sha256.manifest"
 )
+cat >"$OUT/${REL}-BUILD.json" <<EOF
+{
+  "commit": "$SHA",
+  "short": "$SHORT",
+  "built_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "pytests": "src+tests",
+  "beta_germany": "deploy/beta/germany-exit-install.sh",
+  "beta_iran_relay": "deploy/beta/iran-relay-install.sh",
+  "beta_waterwall_exit": "deploy/beta/germany-attach-waterwall.sh",
+  "runbook_fa": "deploy/beta/BETA-OPS-RUNBOOK-fa.md",
+  "waterwall_version": "v1.5.2",
+  "xray_pinned": "v26.10.21"
+}
+EOF
+
 cat >"$OUT/${REL}-HANDOFF.txt" <<EOF
 commit=$SHA
 shahrah_tarball=${REL}.tar.gz
@@ -47,7 +62,9 @@ germany_beta=deploy/beta/germany-exit-install.sh REALITY_HOST=reality.bluelark.i
 rollback=deploy/rollback-install.sh
 control_plane=shahrah brain only (do not enable vpn-infra-kit failover on same host)
 panels_beta=do not install settle/ig; SHAHRAH_BETA=1 if using install-panels.sh
-iran_phase2=blocked for full kit on 1GB; relay-only later if needed
+iran_relay=deploy/beta/iran-relay-install.sh + BETA-OPS-RUNBOOK-fa.md
+backup=scripts/backup-shahrah-bundle.sh + restore-shahrah-drill.sh
+build_meta=${REL}-BUILD.json
 manifest=${REL}.sha256.manifest
 EOF
 

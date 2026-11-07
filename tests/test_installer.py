@@ -115,6 +115,21 @@ def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str)
     assert "enforce_control_plane" in text
 
 
+def test_beta_ops_scripts_are_syntactically_valid() -> None:
+    root = Path(__file__).resolve().parents[1]
+    scripts = (
+        "deploy/beta/germany-attach-waterwall.sh",
+        "deploy/beta/iran-relay-install.sh",
+        "deploy/beta/migrate-exit-public-ip.sh",
+        "deploy/beta/firewall-germany-beta.sh",
+        "deploy/beta/firewall-iran-relay.sh",
+        "scripts/backup-shahrah-bundle.sh",
+        "scripts/restore-shahrah-drill.sh",
+    )
+    for rel in scripts:
+        subprocess.run(["bash", "-n", str(root / rel)], check=True)
+
+
 ARP = (
     "IP address       HW type     Flags       HW address            Mask     Device\n"
     "10.0.0.9         0x1         0x0         00:00:00:00:00:00     *        eth0\n"
