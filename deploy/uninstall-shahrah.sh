@@ -56,10 +56,11 @@ trap 'rm -f "$PLAN_FILE"' EXIT
 plan_args=(uninstall-plan --json)
 [[ "$PURGE" -eq 1 ]] && plan_args+=(--purge)
 
+export SHAHRAH_CLI_READONLY=1
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  log "=== پیش‌نمایش حذف (فقط خواندن — چیزی پاک نمی‌شود) ==="
+  log "=== پیش‌نمایش حذف (فقط خواندن — هیچ نصب pip/venv، هیچ فایلی پاک نمی‌شود) ==="
 else
-  log "=== Shahrah uninstall plan (precomputed) ==="
+  log "=== Shahrah uninstall plan (precomputed; read-only CLI) ==="
 fi
 
 if ! shahrah_cli_or_die "${plan_args[@]}" >"$PLAN_FILE"; then

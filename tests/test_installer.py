@@ -102,6 +102,12 @@ def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> N
     assert "ufw" not in section  # the brain opens no ports
 
 
+def test_uninstall_dry_run_uses_readonly_cli() -> None:
+    text = UNINSTALL.read_text(encoding="utf-8")
+    assert "SHAHRAH_CLI_READONLY=1" in text
+    assert "pip/venv" in text or "pip" in text
+
+
 def test_uninstall_script_precomputes_plan_and_fail_closed() -> None:
     text = UNINSTALL.read_text(encoding="utf-8")
     assert "PLAN_FILE" in text

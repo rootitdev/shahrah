@@ -85,6 +85,33 @@ def test_fake_old_cli_rejects_uninstall_plan(tmp_path: Path) -> None:
     assert "invalid" in (r.stderr + r.stdout).lower()
 
 
+def test_readonly_cli_never_creates_venv(tmp_path: Path) -> None:
+    """Regression: status/preview must not pip install."""
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    stale = fake_bin / "shahrah"
+    stale.write_text(
+        "#!/usr/bin/env bash\n"
+        'echo "invalid choice record-provenance" >&2\n'
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    stale.chmod(0o755)
+    app = tmp_path / "empty-opt"
+    script = f"""
+set -euo pipefail
+export SHAHRAH_SRC_DIR='{ROOT.as_posix()}'
+export SHAHRAH_APP_DIR='{app.as_posix()}'
+export PATH='{fake_bin.as_posix()}:/usr/bin:/bin'
+source '{LIB.as_posix()}'
+shahrah_cli_readonly lifecycle version
+test ! -d '{app.as_posix()}/venv'
+"""
+    result = _bash(script)
+    assert result.returncode == 0, result.stderr + result.stdout
+    assert not (app / "venv").exists()
+
+
 def test_lifecycle_has_feature_new_cli() -> None:
     r = subprocess.run(
         ["python3", "-m", "shahrah", "lifecycle", "has-feature", "--name", "record-provenance"],

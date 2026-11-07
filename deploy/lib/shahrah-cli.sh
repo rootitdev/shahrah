@@ -1,16 +1,59 @@
 # Shared CLI bootstrap for deploy scripts. Source after setting SHAHRAH_SRC_DIR (repo root).
-# Ensures commands from the checkout run before a stale /usr/local/bin/shahrah.
 : "${SHAHRAH_SRC_DIR:?set SHAHRAH_SRC_DIR to the shahrah git root}"
 : "${SHAHRAH_APP_DIR:=/opt/shahrah}"
 : "${SHAHRAH_PYTHON:=python3}"
 
-shahrah_cli_version() {
-  "$1" lifecycle version --json 2>/dev/null || echo '{}'
-}
+export SHAHRAH_CLI_MODE=""
 
 shahrah_cli_has_feature() {
   local bin="$1" feat="$2"
   "$bin" lifecycle has-feature --name "$feat" >/dev/null 2>&1
+}
+
+shahrah_cli_has_feature_module() {
+  local feat="$1"
+  PYTHONPATH="${SHAHRAH_SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" \
+    "$SHAHRAH_PYTHON" -m shahrah lifecycle has-feature --name "$feat" >/dev/null 2>&1
+}
+
+_run_shahrah_cli() {
+  if [[ "${SHAHRAH_CLI_MODE:-}" == module ]]; then
+    PYTHONPATH="${SHAHRAH_SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" \
+      "$SHAHRAH_PYTHON" -m shahrah "$@"
+  else
+    "$SHAHRAH_CLI" "$@"
+  fi
+}
+
+# Read-only: existing venv, system CLI, or python -m from SRC — never pip/venv writes.
+resolve_shahrah_cli_readonly() {
+  if [[ -n "${SHAHRAH_CLI:-}" && -x "$SHAHRAH_CLI" && "${SHAHRAH_CLI_MODE:-}" != module ]]; then
+    if shahrah_cli_has_feature "$SHAHRAH_CLI" lifecycle; then
+      return 0
+    fi
+  fi
+  if [[ -x "$SHAHRAH_APP_DIR/venv/bin/shahrah" ]] \
+    && shahrah_cli_has_feature "$SHAHRAH_APP_DIR/venv/bin/shahrah" lifecycle; then
+    export SHAHRAH_CLI="$SHAHRAH_APP_DIR/venv/bin/shahrah"
+    export SHAHRAH_CLI_MODE=""
+    return 0
+  fi
+  if command -v shahrah >/dev/null; then
+    local sys
+    sys="$(command -v shahrah)"
+    if shahrah_cli_has_feature "$sys" lifecycle; then
+      export SHAHRAH_CLI="$sys"
+      export SHAHRAH_CLI_MODE=""
+      return 0
+    fi
+  fi
+  if [[ -f "$SHAHRAH_SRC_DIR/src/shahrah/__main__.py" ]] \
+    && shahrah_cli_has_feature_module lifecycle; then
+    export SHAHRAH_CLI="$SHAHRAH_PYTHON"
+    export SHAHRAH_CLI_MODE=module
+    return 0
+  fi
+  return 1
 }
 
 bootstrap_shahrah_cli() {
@@ -31,46 +74,53 @@ bootstrap_shahrah_cli() {
   fi
   rm -f "$pip_log"
   export SHAHRAH_CLI="$venv/bin/shahrah"
+  export SHAHRAH_CLI_MODE=""
   export PATH="$venv/bin:$PATH"
   if ! shahrah_cli_has_feature "$SHAHRAH_CLI" lifecycle; then
-    printf 'error: CLI سورس ناسازگار است — SHAHRAH_SRC_DIR را بررسی کنید.\n' >&2
+    printf 'error: CLI سورس ناسازگار است.\n' >&2
     return 1
   fi
   return 0
 }
 
-# Prefer bootstrapped venv; else system CLI if feature exists; else bootstrap attempt.
+# Mutating installs only: readonly resolve, then bootstrap with consent (install.sh).
 resolve_shahrah_cli() {
-  if [[ -n "${SHAHRAH_CLI:-}" && -x "$SHAHRAH_CLI" ]]; then
-    return 0
-  fi
-  if [[ -x "$SHAHRAH_APP_DIR/venv/bin/shahrah" ]] \
-    && shahrah_cli_has_feature "$SHAHRAH_APP_DIR/venv/bin/shahrah" lifecycle; then
-    export SHAHRAH_CLI="$SHAHRAH_APP_DIR/venv/bin/shahrah"
-    export PATH="$SHAHRAH_APP_DIR/venv/bin:$PATH"
-    return 0
-  fi
-  if command -v shahrah >/dev/null \
-    && shahrah_cli_has_feature "$(command -v shahrah)" lifecycle; then
-    export SHAHRAH_CLI="$(command -v shahrah)"
+  if resolve_shahrah_cli_readonly; then
     return 0
   fi
   bootstrap_shahrah_cli
 }
 
+shahrah_cli_readonly() {
+  if ! resolve_shahrah_cli_readonly; then
+    return 1
+  fi
+  _run_shahrah_cli "$@"
+}
+
 shahrah_cli() {
   resolve_shahrah_cli || return 1
-  "$SHAHRAH_CLI" "$@"
+  _run_shahrah_cli "$@"
 }
 
 shahrah_cli_or_die() {
+  local readonly="${SHAHRAH_CLI_READONLY:-0}"
+  if [[ "$readonly" == 1 ]]; then
+    if ! shahrah_cli_readonly "$@"; then
+      cat >&2 <<'EOF'
+خطا: CLI نصب‌شده با سورس هم‌خوان نیست (پیش‌نمایش فقط-خواندنی).
+قدم bootstrap: sudo ./deploy/install.sh --host ... --target ...
+EOF
+      exit 2
+    fi
+    return 0
+  fi
   resolve_shahrah_cli || {
     cat >&2 <<'EOF'
 خطا: نسخهٔ نصب‌شدهٔ shahrah با این سورس هم‌خوان نیست.
-قدم بعدی: cd /opt/shahrah && sudo ./deploy/install.sh --host ... --target ...
-(سورس را به‌روز کرده‌اید؛ یک بار install از همان درخت سورس CLI را هم به‌روز می‌کند.)
+قدم bootstrap: sudo ./deploy/install.sh --host ... --target ...
 EOF
     exit 2
   }
-  "$SHAHRAH_CLI" "$@"
+  _run_shahrah_cli "$@"
 }

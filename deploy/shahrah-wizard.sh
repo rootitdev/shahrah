@@ -31,11 +31,11 @@ need_root() {
 }
 
 show_status() {
-  if ! resolve_shahrah_cli 2>/dev/null; then
-    err "CLI قدیمی — ابتدا: sudo $INSTALL --host ... --target ..."
+  if ! shahrah_cli_readonly lifecycle status --fa --src-root "$SRC_DIR" 2>/dev/null; then
+    err "CLI قدیمی — فقط وضعیت از سورس ممکن نیست."
+    err "قدم bootstrap (با رضایت): sudo $INSTALL --host ... --target ..."
     return 1
   fi
-  shahrah_cli lifecycle status --fa --src-root "$SRC_DIR" || return 1
   return 0
 }
 

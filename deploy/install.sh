@@ -690,7 +690,8 @@ init_node() {
     shahrah --state "$state" init --host "$HOST" --target "$TARGET" \
       --profile "$PROFILE" --port "$PORT" "${extra[@]}"
   fi
-  if [[ -z "$(shahrah --state "$state" user list)" ]]; then
+  if [[ "${SHAHRAH_SKIP_FIRST_USER:-0}" != 1 ]] \
+    && [[ -z "$(shahrah --state "$state" user list)" ]]; then
     shahrah --state "$state" user add first >/dev/null
   fi
   # Loopback StatsService for `shahrah usage` on independent nodes (not panel cores).
