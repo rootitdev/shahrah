@@ -49,7 +49,14 @@ from .brain import Brain, BrainConfig, PanelSync, describe, run_forever
 from .install_flags import ReconfigurePlan, apply_plan
 from .links import build_subscription, vless_link
 from .models import ConfigError, Listener, Profile, User
-from .ownership import InstallManifest, default_manifest, plan_removal
+from .ownership import (
+    InstallManifest,
+    build_uninstall_plan,
+    default_manifest,
+    enrich_manifest_from_state,
+    load_provenance,
+    record_provenance_json,
+)
 from .panel import PanelClient, PanelError, sync
 from .prober import (
     ProbeError,
@@ -119,6 +126,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="optional path to write pre-change state copy",
     )
+    reconf.add_argument(
+        "--apply-check",
+        action="store_true",
+        help="after save, render xray config and run xray -test (used by install.sh)",
+    )
+    reconf.add_argument("--xray-bin", default="xray")
+    reconf.add_argument("--config-out", type=Path, default=DEFAULT_XRAY_CONFIG)
 
     relay = sub.add_parser("relay", help="named Iran relay peers (multi-exit)")
     relay_sub = relay.add_subparsers(dest="relay_command", required=True)
@@ -154,6 +168,24 @@ def _build_parser() -> argparse.ArgumentParser:
     rp_render.add_argument("--store", type=Path, default=Path("/etc/shahrah/relay-peers.json"))
     rp_render.add_argument("--out-dir", type=Path, default=Path("/etc/shahrah/waterwall"))
     relay_sub.add_parser("print-unit", help="systemd template for shahrah-waterwall@.service")
+    rp_act = relay_sub.add_parser(
+        "peer-activate",
+        help="render peer, install @.service template if missing, print enable commands",
+    )
+    rp_act.add_argument("--name", required=True)
+    rp_act.add_argument("--store", type=Path, default=Path("/etc/shahrah/relay-peers.json"))
+    rp_act.add_argument("--out-dir", type=Path, default=Path("/etc/shahrah/waterwall"))
+    rp_act.add_argument(
+        "--unit-file",
+        type=Path,
+        default=Path("/etc/systemd/system/shahrah-waterwall@.service"),
+    )
+
+    prov = sub.add_parser("record-provenance", help="record installer-owned binary digest")
+    prov.add_argument("--path", type=Path, required=True)
+    prov.add_argument("--kind", required=True)
+    prov.add_argument("--sha256", required=True)
+    prov.add_argument("--utc", default="")
 
     apply = sub.add_parser("apply", help="render and validate the Xray server config")
     apply.add_argument("--config-out", type=Path, default=DEFAULT_XRAY_CONFIG)
@@ -396,6 +428,11 @@ def _build_parser() -> argparse.ArgumentParser:
         ],
     )
     show.add_argument("--ssh-port", type=int, default=22)
+    show.add_argument(
+        "--public-ports",
+        default="",
+        help="comma-separated listener ports for install-manifest (UFW scope)",
+    )
 
     uninst = sub.add_parser(
         "uninstall-plan",
@@ -1598,6 +1635,22 @@ def _run_reconfigure(args: argparse.Namespace, state_path: Path, out: TextIO) ->
     if state.private_key != old_key:
         raise ConfigError("reconfigure must not rotate REALITY private key")
     save_state(state_path, state)
+    if args.apply_check:
+        xray = args.xray_bin
+        cfg_out = args.config_out
+        text = dumps(render_server_config(state))
+        write_private_file(cfg_out, text)
+        proc = subprocess.run(  # noqa: S603
+            [xray, "run", "-test", "-config", str(cfg_out)],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0:
+            if args.snapshot and args.snapshot.is_file():
+                save_state(state_path, load_state(args.snapshot))
+                out.write("reconfigure rolled back to snapshot (xray -test failed)\n")
+            detail = proc.stderr.strip() or proc.stdout.strip()
+            raise ConfigError(f"xray -test failed: {detail}")
     for line in notes:
         out.write(f"  {line}\n")
     out.write("reconfigure applied (users and REALITY keys preserved)\n")
@@ -1650,6 +1703,41 @@ def _run_relay(args: argparse.Namespace, out: TextIO) -> int:
         return 0
     if args.relay_command == "print-unit":
         out.write(systemd_instance_unit())
+        return 0
+    if args.relay_command == "peer-activate":
+        store = load_store(args.store)
+        peer = next((p for p in store.peers if p.name == args.name), None)
+        if peer is None:
+            raise ConfigError(f"no peer named {args.name!r}")
+        iran_ip = peer.iran_ip or store.iran_entry_host
+        if not iran_ip:
+            raise ConfigError("iran_ip or store iran_entry_host required")
+        key = Path(f"/etc/shahrah/backhaul-{args.name}.key")
+        if not key.is_file():
+            raise ConfigError(f"missing {key}")
+        password = key.read_text(encoding="utf-8").strip()
+        wd = peer_workdir(args.out_dir, args.name)
+        wd.mkdir(parents=True, exist_ok=True)
+        cfg, core = render_peer_configs(peer, password, iran_ip)
+        write_private_file(wd / "config.json", waterwall.dumps(cfg))
+        write_private_file(wd / "core.json", waterwall.dumps(core))
+        if not args.unit_file.is_file():
+            args.unit_file.write_text(systemd_instance_unit(), encoding="utf-8")
+            out.write(f"wrote {args.unit_file}\n")
+        out.write(f"ufw allow {peer.user_port}/tcp\n")
+        if peer.mode == "reverse":
+            out.write(
+                f"ufw allow from {peer.exit_ip} to any port {peer.tunnel_port} proto tcp\n"
+            )
+        out.write("systemctl daemon-reload\n")
+        out.write(f"systemctl enable --now shahrah-waterwall@{args.name}\n")
+        out.write(
+            f"HANDOFF exit: scp {key} root@{peer.exit_ip}:/etc/shahrah/backhaul-{args.name}.key\n"
+        )
+        out.write(
+            f"HANDOFF exit: PEER_NAME={args.name} IRAN_PEER_IP={iran_ip} "
+            f"./deploy/beta/exit-attach-relay-peer.sh\n"
+        )
         return 0
     if args.relay_command == "peer-add":
         store = load_store(store_path)
@@ -1717,35 +1805,49 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "relay":
         return _run_relay(args, out)
 
+    if args.command == "record-provenance":
+        import datetime as dt
+
+        utc = args.utc or dt.datetime.now(dt.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        record_provenance_json(str(args.path), args.kind, args.sha256, utc)
+        out.write(f"recorded provenance for {args.path}\n")
+        return 0
+
     if args.command == "uninstall-plan":
         manifest = default_manifest()
         if args.manifest.is_file():
             manifest = InstallManifest.from_json(args.manifest.read_text(encoding="utf-8"))
+        manifest = enrich_manifest_from_state(manifest, Path("/etc/shahrah/state.json"))
         peer_dirs: list[Path] = []
         store = load_store(Path("/etc/shahrah/relay-peers.json"))
+        tunnel_deletes: list[str] = []
         if store.peers:
             base = Path("/etc/shahrah/waterwall")
             peer_dirs = [peer_workdir(base, p.name) for p in store.peers]
-        units, paths = plan_removal(
+            for peer in store.peers:
+                tunnel_deletes.append(
+                    f"ufw delete allow from {peer.exit_ip} to any port {peer.tunnel_port} proto tcp"
+                )
+                tunnel_deletes.append(f"ufw delete allow {peer.user_port}/tcp")
+        payload = build_uninstall_plan(
             manifest,
             purge_data=args.purge,
-            extra_peer_dirs=tuple(peer_dirs),
+            peer_workdirs=tuple(peer_dirs),
+            provenance=load_provenance(),
+            extra_tunnel_ufw_deletes=tunnel_deletes,
         )
-        payload = {
-            "units": units,
-            "paths": paths,
-            "note": "does not disable ufw globally or remove SSH",
-        }
         if args.json:
             out.write(json.dumps(payload, indent=2) + "\n")
         else:
             out.write("units:\n")
-            for u in units:
+            for u in payload["units"]:
                 out.write(f"  {u}\n")
-            if paths:
-                out.write("paths (purge):\n")
-                for p in paths:
-                    out.write(f"  {p}\n")
+            for key in ("unit_files", "ufw_delete", "paths", "binaries"):
+                items = payload.get(key) or []
+                if items:
+                    out.write(f"{key}:\n")
+                    for item in items:
+                        out.write(f"  {item}\n")
         return 0
 
     if args.command == "print":
@@ -1760,7 +1862,14 @@ def _run(args: argparse.Namespace) -> int:
         elif args.what == "sysctl":
             out.write(deploy.sysctl_conf())
         elif args.what == "install-manifest":
-            out.write(default_manifest().to_json())
+            ports: list[int] = []
+            raw = getattr(args, "public_ports", "") or ""
+            if raw:
+                ports = [int(p.strip()) for p in raw.split(",") if p.strip()]
+            manifest = default_manifest()
+            manifest.ssh_port = int(getattr(args, "ssh_port", 22) or 22)
+            manifest.public_ports = ports
+            out.write(manifest.to_json())
         elif args.what == "ufw":
             ports = [item.port for item in load_state(state_path).server_settings().listeners()]
             out.write("\n".join(deploy.ufw_commands(ssh_port=args.ssh_port, public_ports=ports)))

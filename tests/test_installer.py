@@ -100,6 +100,15 @@ def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> N
     assert "ufw" not in section  # the brain opens no ports
 
 
+def test_uninstall_script_precomputes_plan_and_fail_closed() -> None:
+    text = UNINSTALL.read_text(encoding="utf-8")
+    assert "PLAN_FILE" in text
+    assert "fail-closed" in text
+    assert "ufw --force disable" not in text
+    assert "ufw reset" not in text
+    assert "daemon-reload" in text
+
+
 def test_existing_state_honours_explicit_installer_flags(text: str) -> None:
     assert "EXPLICIT_HOST=0" in text
     assert "reconfigure" in text
@@ -135,6 +144,9 @@ def test_beta_ops_scripts_are_syntactically_valid() -> None:
         "deploy/beta/firewall-iran-relay.sh",
         "scripts/backup-shahrah-bundle.sh",
         "scripts/restore-shahrah-drill.sh",
+        "deploy/beta/exit-attach-relay-peer.sh",
+        "deploy/beta/iran-bootstrap-relay-peer.sh",
+        "deploy/upgrade-shahrah.sh",
     )
     for rel in scripts:
         subprocess.run(["bash", "-n", str(root / rel)], check=True)

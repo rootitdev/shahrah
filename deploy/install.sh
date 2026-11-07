@@ -280,7 +280,21 @@ install_xray() {
 
   unzip -q -o "$WORK_DIR/$asset" xray -d "$WORK_DIR"
   install -m 0755 "$WORK_DIR/xray" /usr/local/bin/xray
+  record_binary_provenance xray /usr/local/bin/xray
   log "installed $(/usr/local/bin/xray version | head -n 1)"
+}
+
+record_binary_provenance() {
+  local kind="$1" path="$2" sha utc
+  [[ -f "$path" ]] || return 0
+  sha="$(sha256sum "$path" | awk '{print $1}')"
+  utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if command -v shahrah >/dev/null; then
+    shahrah record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null
+  else
+    PYTHONPATH="${SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
+      "from shahrah.ownership import record_provenance_json; record_provenance_json('$path','$kind','$sha','$utc')"
+  fi
 }
 
 # --- gateway discovery (paqet crafts Ethernet frames, so it needs the next hop's MAC) ------
@@ -506,6 +520,7 @@ install_waterwall() {
   [[ "$actual" == "$expected" ]] || die "checksum mismatch for WaterWall (expected $expected, got $actual)"
   unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
   install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
+  record_binary_provenance waterwall /usr/local/bin/waterwall
   rm -rf "$dir"
 
   self="${WW_SELF:-$(ip -4 -o addr show dev "$(default_iface)" | awk '{split($4,a,"/"); print a[1]; exit}')}"
@@ -636,7 +651,11 @@ init_node() {
       snap="/var/lib/shahrah/reconfigure-$(date +%s).json"
       reconf+=(--snapshot "$snap")
       log "applying explicit installer flags (keys/users preserved; snapshot ${snap})"
-      shahrah --state "$state" reconfigure "${reconf[@]}"
+      reconf+=(--apply-check --xray-bin /usr/local/bin/xray --config-out "$CONF_DIR/xray.json")
+      shahrah --state "$state" reconfigure "${reconf[@]}" \
+        || die "reconfigure failed (state restored from snapshot if xray -test failed)"
+      shahrah --state "$state" apply --xray-bin /usr/local/bin/xray \
+        --config-out "$CONF_DIR/xray.json" --group "$SERVICE_USER"
     fi
   else
     log "generating REALITY keys on this machine"
@@ -717,7 +736,13 @@ EOF
 
 write_install_manifest() {
   install -d -m 0700 -o root -g root /var/lib/shahrah
-  shahrah print install-manifest >"$INSTALL_MANIFEST"
+  detect_ssh_port
+  local ports=""
+  if [[ -f "$CONF_DIR/state.json" ]]; then
+    ports="$(shahrah --state "$CONF_DIR/state.json" listener list 2>/dev/null | awk '{print $1}' | paste -sd, -)"
+  fi
+  shahrah print install-manifest --ssh-port "$SSH_PORT" ${ports:+--public-ports "$ports"} \
+    >"$INSTALL_MANIFEST"
   chmod 0600 "$INSTALL_MANIFEST"
 }
 

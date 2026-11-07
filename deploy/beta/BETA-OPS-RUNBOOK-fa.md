@@ -159,3 +159,33 @@ sudo ./deploy/uninstall-shahrah.sh --purge --backup /root/shahrah-backups --yes
 ```
 
 `uninstall` هرگز SSH یا ufw سراسری را reset نمی‌کند.
+
+## نصب از clone تازه / ارتقا روی main (بعد از merge والد)
+
+```bash
+git clone https://github.com/rootitdev/shahrah.git /opt/shahrah
+cd /opt/shahrah && git checkout main
+sudo ./deploy/install.sh --host 185.19.33.221 --target www.cloudflare.com
+```
+
+**checkout جدا در `/opt/shahrah` با تغییر محلی:**
+
+```bash
+sudo ./deploy/upgrade-shahrah.sh --ref main
+# فقط با فلگ صریح host/target/multi-port عوض می‌شود؛ credential در /etc/shahrah می‌ماند
+```
+
+**چند خروج (bootstrap هر طرف):**
+
+```bash
+# ایران
+sudo PEER_NAME=de EXIT_IP=<EXIT1_IPV4> IRAN_IP=<IRAN_IPV4> ENTRY_HOST=<IRAN_IPV4> \
+  ./deploy/beta/iran-bootstrap-relay-peer.sh
+# سپس دستورات peer-activate (ufw + systemctl)
+
+# exit1
+sudo scp /etc/shahrah/backhaul-de.key root@<EXIT1>:/etc/shahrah/backhaul-de.key
+sudo PEER_NAME=de IRAN_PEER_IP=<IRAN_IPV4> ./deploy/beta/exit-attach-relay-peer.sh
+```
+
+PasarGuard روی سرور اصلی **الان** نصب/یکپارچه نیست — مدیریت کاربر هر exit جدا است.
