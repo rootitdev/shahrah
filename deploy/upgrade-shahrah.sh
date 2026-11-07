@@ -2,10 +2,14 @@
 # Upgrade from a git checkout (default /opt/shahrah). Preserves /etc/shahrah credentials.
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHAHRAH_SRC_DIR="${APP_DIR:-/opt/shahrah}"
 APP_DIR="${APP_DIR:-/opt/shahrah}"
 CONF_DIR="/etc/shahrah"
 REF="${SHAHRAH_REF:-main}"
 VENV="${SHAHRAH_VENV:-$APP_DIR/venv}"
+# shellcheck source=lib/shahrah-cli.sh
+source "$SCRIPT_DIR/lib/shahrah-cli.sh"
 
 usage() {
   cat <<EOF
@@ -49,9 +53,10 @@ fi
 
 PY=python3
 "$PY" -c 'import sys; exit(0 if sys.version_info>=(3,11) else 1)' || PY=python3.11
-"$PY" -m venv "$VENV"
-"$VENV/bin/pip" install --quiet --upgrade "$APP_DIR"
-ln -sf "$VENV/bin/shahrah" /usr/local/bin/shahrah
+SHAHRAH_SRC_DIR="$APP_DIR"
+export SHAHRAH_APP_DIR="$APP_DIR"
+bootstrap_shahrah_cli || { echo "bootstrap CLI failed" >&2; exit 2; }
+ln -sf "$SHAHRAH_CLI" /usr/local/bin/shahrah
 
 if [[ ! -f "$CONF_DIR/state.json" ]]; then
   echo "no $CONF_DIR/state.json — run deploy/install.sh --host ... --target ..." >&2

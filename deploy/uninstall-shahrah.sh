@@ -2,6 +2,12 @@
 # Stop/disable Shahrah units, remove unit files, scoped UFW deletes; optional --purge for data.
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHAHRAH_SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SHAHRAH_APP_DIR="${SHAHRAH_APP_DIR:-/opt/shahrah}"
+# shellcheck source=lib/shahrah-cli.sh
+source "$SCRIPT_DIR/lib/shahrah-cli.sh"
+
 MANIFEST="/var/lib/shahrah/install-manifest.json"
 PLAN_FILE=""
 DRY_RUN=0
@@ -17,7 +23,7 @@ Usage: uninstall-shahrah.sh [options]
 Default (no --purge): stop/disable managed units, remove unit files, scoped ufw deletes;
                      keep /etc/shahrah state and credentials.
 
-  --dry-run        print full plan JSON only
+  --dry-run        print full plan JSON only (read-only; nothing removed)
   --purge          also remove owned data trees and provenance-matched binaries
   --backup DIR     before --purge, tar etc/shahrah + var/lib/shahrah (required to succeed)
   --yes            skip confirmation (required with --purge)
@@ -43,18 +49,24 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ "$(id -u)" -eq 0 ]] || die "run as root"
-command -v shahrah >/dev/null || die "shahrah CLI required to build uninstall plan"
 
 PLAN_FILE="$(mktemp /tmp/shahrah-uninstall-plan.XXXXXX.json)"
 trap 'rm -f "$PLAN_FILE"' EXIT
 
 plan_args=(uninstall-plan --json)
 [[ "$PURGE" -eq 1 ]] && plan_args+=(--purge)
-if ! shahrah "${plan_args[@]}" >"$PLAN_FILE"; then
+
+export SHAHRAH_CLI_READONLY=1
+if [[ "$DRY_RUN" -eq 1 ]]; then
+  log "=== پیش‌نمایش حذف (فقط خواندن — هیچ نصب pip/venv، هیچ فایلی پاک نمی‌شود) ==="
+else
+  log "=== Shahrah uninstall plan (precomputed; read-only CLI) ==="
+fi
+
+if ! shahrah_cli_or_die "${plan_args[@]}" >"$PLAN_FILE"; then
   die "failed to build uninstall plan"
 fi
 
-log "=== Shahrah uninstall plan (precomputed) ==="
 python3 - "$PLAN_FILE" <<'PY'
 import json, sys
 p = json.load(open(sys.argv[1]))
@@ -65,7 +77,7 @@ for key in ("units", "unit_files", "ufw_delete", "paths", "binaries"):
 print(p.get("note", ""))
 PY
 
-[[ "$DRY_RUN" -eq 1 ]] && { log "dry-run complete"; exit 0; }
+[[ "$DRY_RUN" -eq 1 ]] && { log "dry-run complete — no changes made"; exit 0; }
 
 [[ "$PURGE" -eq 1 ]] || true
 if [[ "$PURGE" -eq 1 ]]; then
@@ -97,7 +109,6 @@ while read -r unit; do
   stop_unit "$unit"
 done < <(python3 -c "import json;[print(u) for u in json.load(open('$PLAN_FILE'))['units']]")
 
-# Explicit template instances
 for f in /etc/systemd/system/shahrah-waterwall@*.service \
          /etc/systemd/system/shahrah-waterwall-exit@*.service; do
   [[ -e "$f" ]] || continue

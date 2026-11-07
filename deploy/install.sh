@@ -78,6 +78,26 @@ trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
+install_stage_fail() {
+  local stage="$1" detail="$2"
+  printf '\033[1;31merror [%s]:\033[0m %s\n' "$stage" "$detail" >&2
+  printf 'وضعیت فعلی: credentialها در /etc/shahrah معمولاً حفظ می‌شوند.\n' >&2
+  printf 'قدم بازیابی: cd %s && sudo ./deploy/install.sh --host ... --target ...\n' "$SRC_DIR" >&2
+  exit 1
+}
+
+# Beta scripts source this file without main(); bootstrap CLI from git before new subcommands.
+ensure_shahrah_cli() {
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="${PYTHON_BIN:-python3}"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  if resolve_shahrah_cli 2>/dev/null; then
+    export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+    return 0
+  fi
+  bootstrap_shahrah_cli && export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+}
+
 usage() {
   cat <<'EOF'
 Usage: install.sh --host HOST [options]      (VPN exit/entry node)
@@ -287,14 +307,14 @@ install_xray() {
 record_binary_provenance() {
   local kind="$1" path="$2" sha utc
   [[ -f "$path" ]] || return 0
+  ensure_shahrah_cli 2>/dev/null || true
   sha="$(sha256sum "$path" | awk '{print $1}')"
   utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  if command -v shahrah >/dev/null; then
-    shahrah record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null
-  else
-    PYTHONPATH="${SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" python3 -c \
-      "from shahrah.ownership import record_provenance_json; record_provenance_json('$path','$kind','$sha','$utc')"
+  if shahrah_cli record-provenance --kind "$kind" --path "$path" --sha256 "$sha" --utc "$utc" >/dev/null 2>&1; then
+    return 0
   fi
+  PYTHONPATH="${SRC_DIR}/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON_BIN" -c \
+    "from shahrah.ownership import record_provenance_json; record_provenance_json('$path','$kind','$sha','$utc')"
 }
 
 # --- gateway discovery (paqet crafts Ethernet frames, so it needs the next hop's MAC) ------
@@ -509,6 +529,7 @@ install_warp() {
 }
 
 install_waterwall() {
+  ensure_shahrah_cli || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
   local arch expected actual dir self service="127.0.0.1:${PORT}" iran_ip exit_ip
   arch="$(arch_suffix)"
   if [[ "$arch" == amd64 ]]; then arch="x64"; expected="$WW_SHA256_X64"; else expected="$WW_SHA256_ARM64"; fi
@@ -620,10 +641,16 @@ install_paqet() {
 }
 
 install_app() {
-  log "installing shahrah from ${SRC_DIR} (with ${PYTHON_BIN})"
-  "$PYTHON_BIN" -m venv "$APP_DIR/venv"
-  "$APP_DIR/venv/bin/pip" install --quiet --upgrade "$SRC_DIR"
-  ln -sf "$APP_DIR/venv/bin/shahrah" /usr/local/bin/shahrah
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="$PYTHON_BIN"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  if ! bootstrap_shahrah_cli; then
+    die "نصب CLI از سورس ناموفق بود — سرویس/کلیدهای فعلی دست‌نخورده‌اند. cd ${SRC_DIR} && git status"
+  fi
+  log "CLI synced from source (lifecycle api OK)"
+  if [[ -x "$SHAHRAH_CLI" ]]; then
+    ln -sf "$SHAHRAH_CLI" /usr/local/bin/shahrah
+  fi
 }
 
 setup_user_and_dirs() {
@@ -633,6 +660,7 @@ setup_user_and_dirs() {
 }
 
 init_node() {
+  ensure_shahrah_cli || die "CLI bootstrap failed"
   local state="$CONF_DIR/state.json" extra=() spec
   [[ "$PORT" == "443" || "$PORT" == "80" || "$PORT" == "53" ]] || extra+=(--allow-non-443)
   for spec in "${EXTRA_LISTENERS[@]}"; do
@@ -662,7 +690,8 @@ init_node() {
     shahrah --state "$state" init --host "$HOST" --target "$TARGET" \
       --profile "$PROFILE" --port "$PORT" "${extra[@]}"
   fi
-  if [[ -z "$(shahrah --state "$state" user list)" ]]; then
+  if [[ "${SHAHRAH_SKIP_FIRST_USER:-0}" != 1 ]] \
+    && [[ -z "$(shahrah --state "$state" user list)" ]]; then
     shahrah --state "$state" user add first >/dev/null
   fi
   # Loopback StatsService for `shahrah usage` on independent nodes (not panel cores).
@@ -770,9 +799,15 @@ main() {
   enforce_control_plane
   check_system
   install_packages
-  install_xray
-  install_app
+  export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR"
+  # shellcheck source=lib/shahrah-cli.sh
+  source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
+  install_app || install_stage_fail "bootstrap-cli" "نصب پایتون از سورس قبل از Xray"
   setup_user_and_dirs
+  case "$ROLE" in
+    relay|brain) log "skipping Xray download (role=$ROLE)" ;;
+    *) install_xray ;;
+  esac
   if [[ "$ROLE" == "brain" ]]; then
     install_brain
     return

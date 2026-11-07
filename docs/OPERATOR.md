@@ -5,6 +5,20 @@ Pick **one** control plane: [CONTROL-PLANE.md](CONTROL-PLANE.md) (Shahrah brain 
 End-to-end path to a lab or production Shahrah deployment. No real IPs/domains belong in git;
 substitute your own.
 
+### Git source newer than `/usr/local/bin/shahrah`
+
+After `git pull` on `/opt/shahrah`, always re-run idempotent install so the venv CLI
+matches the tree (avoids stale `record-provenance` / `uninstall-plan` errors):
+
+```bash
+cd /opt/shahrah
+sudo ./deploy/install.sh --host "$(python3 -c "import json;print(json.load(open('/etc/shahrah/state.json'))['public_host'])")" \
+  --target "$(python3 -c "import json;print(json.load(open('/etc/shahrah/state.json'))['target_host'])")"
+```
+
+Status (Persian): `sudo ./deploy/shahrah-wizard.sh` or
+`shahrah lifecycle status --fa --src-root /opt/shahrah`.
+
 ## 1. Foreign exit (REALITY multi-port)
 
 ```bash
