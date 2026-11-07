@@ -20,6 +20,7 @@ KNOWN_FEATURES = frozenset(
         "uninstall-plan",
         "reconfigure",
         "relay",
+        "waterwall-binary",
     }
 )
 

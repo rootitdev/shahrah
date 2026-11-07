@@ -43,6 +43,7 @@ from . import (
     vantage,
     warp,
     waterwall,
+    waterwall_binary,
 )
 from . import lifecycle as lifecycle_mod
 from . import soak as soakmod
@@ -889,6 +890,44 @@ def _build_parser() -> argparse.ArgumentParser:
     wwp.add_argument("--open-peer", action="store_true", help="do not whitelist the peer IP")
     wwp.add_argument("--workdir", default="/etc/shahrah/waterwall")
     wwp.add_argument("--out-dir", type=Path, help="write config.json/core.json here (0600)")
+
+    wwb = sub.add_parser(
+        "waterwall-binary",
+        help="choose standard vs old-cpu WaterWall zip (pinned checksums)",
+    )
+    wwb_sub = wwb.add_subparsers(dest="ww_binary_action", required=True)
+    wwb_plan = wwb_sub.add_parser("plan", help="resolve variant + asset name + checksum (JSON)")
+    wwb_plan.add_argument("--arch", choices=["x64", "arm64"], required=True)
+    wwb_plan.add_argument(
+        "--variant",
+        choices=sorted(waterwall_binary.VARIANTS),
+        default="auto",
+        help="auto: AVX2 probe + persisted variant file (not installed ELF)",
+    )
+    wwb_plan.add_argument(
+        "--persist",
+        type=Path,
+        default=waterwall_binary.PERSIST_DEFAULT,
+        help="read/write variant choice for idempotent reinstalls",
+    )
+    wwb_plan.add_argument(
+        "--write-persist",
+        action="store_true",
+        help="record resolved variant on disk",
+    )
+    wwb_plan.add_argument("--cpuinfo", type=Path, help="override /proc/cpuinfo for tests")
+    wwb_skip = wwb_sub.add_parser(
+        "skip-download",
+        help="true when persisted variant matches and installed ELF verifies (JSON)",
+    )
+    wwb_skip.add_argument("--arch", choices=["x64", "arm64"], required=True)
+    wwb_skip.add_argument("--variant", choices=["standard", "old-cpu"], required=True)
+    wwb_skip.add_argument("--persist", type=Path, default=waterwall_binary.PERSIST_DEFAULT)
+    wwb_skip.add_argument(
+        "--installed",
+        type=Path,
+        default=Path("/usr/local/bin/waterwall"),
+    )
 
     tsign = sub.add_parser(
         "tactics-sign",
@@ -2064,6 +2103,43 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "waterwall-config":
         return _run_waterwall(args, out)
+
+    if args.command == "waterwall-binary":
+        if args.ww_binary_action == "skip-download":
+            ok = waterwall_binary.should_skip_waterwall_download(
+                arch=args.arch,
+                variant=args.variant,
+                persist_path=args.persist,
+                installed=args.installed,
+            )
+            out.write(json.dumps({"skip_download": ok}) + "\n")
+            return 0
+        if args.ww_binary_action != "plan":
+            raise ConfigError("unknown waterwall-binary action")
+        cpuinfo = None
+        if args.cpuinfo is not None:
+            cpuinfo = args.cpuinfo.read_text(encoding="utf-8")
+        variant = waterwall_binary.resolve_cpu_variant(
+            arch=args.arch,
+            requested=args.variant,
+            persist_path=args.persist,
+            cpuinfo_text=cpuinfo,
+        )
+        if args.write_persist:
+            waterwall_binary.persist_cpu_variant(variant, args.persist)
+        asset, zip_sha, elf_sha = waterwall_binary.variant_for_asset(args.arch, variant)
+        base = f"https://github.com/radkesvat/WaterWall/releases/download/{waterwall_binary.WW_VERSION}"
+        payload = {
+            "version": waterwall_binary.WW_VERSION,
+            "arch": args.arch,
+            "variant": variant,
+            "asset": asset,
+            "zip_sha256": zip_sha,
+            "elf_sha256": elf_sha or None,
+            "url": f"{base}/{asset}",
+        }
+        out.write(json.dumps(payload, indent=2) + "\n")
+        return 0
 
     if args.command == "tactics-sign":
         key_hex = os.environ.get("SHAHRAH_TACTICS_KEY", "").strip()

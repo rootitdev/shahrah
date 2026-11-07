@@ -31,6 +31,8 @@ HY2_SHA256_ARM64="a68a61a84452ca250ce0368202521965ca9cc9d801a404f1dc9008ac6cf677
 
 # WaterWall Iran<->exit backhaul (MPL-2.0, https://github.com/radkesvat/WaterWall); opt-in.
 WW_VERSION="v1.5.2"
+WW_CPU_VARIANT="${WW_CPU_VARIANT:-auto}"
+# Legacy names (install_waterwall uses shahrah waterwall-binary plan for checksums).
 WW_SHA256_X64="1d9ba7da4a3ab42b5685e5ecf03cf3d93a97ede5fd9fce8a12dbfc23e04a829a"
 WW_SHA256_ARM64="56486a3a8d02a67f782d45a6155bea4e437348c72611a3f685459d97966ff96b"
 
@@ -89,15 +91,27 @@ install_stage_fail() {
 }
 
 # Beta scripts source this file without main(); bootstrap CLI from git before new subcommands.
+# Optional arg: required subcommand (e.g. waterwall-binary) — stale venv is upgraded.
 ensure_shahrah_cli() {
+  local need="${1:-}"
   export SHAHRAH_SRC_DIR="$SRC_DIR" SHAHRAH_APP_DIR="$APP_DIR" SHAHRAH_PYTHON="${PYTHON_BIN:-python3}"
   # shellcheck source=lib/shahrah-cli.sh
   source "$SRC_DIR/deploy/lib/shahrah-cli.sh"
-  if resolve_shahrah_cli 2>/dev/null; then
-    export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+  if ! resolve_shahrah_cli_for_install "$need"; then
+    return 1
+  fi
+  export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+  shahrah() { shahrah_cli "$@"; }
+}
+
+ensure_waterwall_host_tools() {
+  if command -v unzip >/dev/null && command -v curl >/dev/null; then
     return 0
   fi
-  bootstrap_shahrah_cli && export PATH="$(dirname "$SHAHRAH_CLI"):$PATH"
+  command -v apt-get >/dev/null || die "unzip and curl required (apt-get not available)"
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq unzip curl ca-certificates >/dev/null
 }
 
 usage() {
@@ -130,6 +144,8 @@ Usage: install.sh --host HOST [options]      (VPN exit/entry node)
                     inter-server leg port (default 8443)
   --ww-cover SNI[@IP]
                     cover site for the backhaul Reality leg; @IP pins it (no DNS per handshake)
+  --ww-cpu-variant auto|standard|old-cpu
+                    WaterWall x86/arm build: auto detects missing AVX2 (default auto)
   -h, --help        show this help
 EOF
 }
@@ -158,6 +174,7 @@ parse_args() {
       --ww-mode) WW_MODE="${2:?--ww-mode needs reverse or direct}"; shift 2 ;;
       --ww-tunnel-port) WW_TUNNEL_PORT="${2:?--ww-tunnel-port needs a PORT}"; shift 2 ;;
       --ww-cover) WW_COVER_SNI="${2%%@*}"; [[ "$2" == *@* ]] && WW_COVER_ADDR="${2#*@}"; shift 2 ;;
+      --ww-cpu-variant) WW_CPU_VARIANT="${2:?--ww-cpu-variant needs auto, standard, or old-cpu}"; shift 2 ;;
       -h|--help) usage; exit 0 ;;
       *) usage >&2; die "unknown option: $1" ;;
     esac
@@ -543,22 +560,37 @@ preflight_panel_exit_owned() {
 }
 
 install_waterwall() {
-  ensure_shahrah_cli || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
+  ensure_shahrah_cli waterwall-binary || die "CLI bootstrap failed (کپی سورس جدید را با install.sh اجرا کنید)"
+  ensure_waterwall_host_tools
   preflight_panel_exit_owned
-  local arch expected actual dir self service iran_ip exit_ip
+  local ww_arch plan_json zip_expected actual dir self service iran_ip exit_ip variant url asset skip
   service="${WW_EXIT_SERVICE:-127.0.0.1:${PORT}}"
-  arch="$(arch_suffix)"
-  if [[ "$arch" == amd64 ]]; then arch="x64"; expected="$WW_SHA256_X64"; else expected="$WW_SHA256_ARM64"; fi
-  dir="$(mktemp -d)"
-  log "downloading WaterWall ${WW_VERSION}"
-  curl -fsSL --retry 3 -o "$dir/ww.zip" \
-    "https://github.com/radkesvat/WaterWall/releases/download/${WW_VERSION}/Waterwall-linux-gcc-${arch}.zip"
-  actual="$(sha256sum "$dir/ww.zip" | awk '{print $1}')"
-  [[ "$actual" == "$expected" ]] || die "checksum mismatch for WaterWall (expected $expected, got $actual)"
-  unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
-  install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
-  record_binary_provenance waterwall /usr/local/bin/waterwall
-  rm -rf "$dir"
+  case "$(uname -m)" in
+    x86_64|amd64) ww_arch="x64" ;;
+    aarch64|arm64) ww_arch="arm64" ;;
+    *) die "waterwall: unsupported architecture: $(uname -m)" ;;
+  esac
+  plan_json="$(shahrah_cli waterwall-binary plan --arch "$ww_arch" --variant "$WW_CPU_VARIANT" --write-persist)"
+  variant="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["variant"])')"
+  asset="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["asset"])')"
+  zip_expected="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["zip_sha256"])')"
+  url="$(printf '%s' "$plan_json" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["url"])')"
+  skip="$(shahrah_cli waterwall-binary skip-download --arch "$ww_arch" --variant "$variant" \
+    --persist "$CONF_DIR/waterwall-cpu.variant" --installed /usr/local/bin/waterwall \
+    | "$PYTHON_BIN" -c 'import json,sys; print("1" if json.load(sys.stdin)["skip_download"] else "0")')"
+  if [[ "$skip" == 1 ]]; then
+    log "WaterWall ${WW_VERSION} (${variant}) installed ELF OK; skip download"
+  else
+    dir="$(mktemp -d)"
+    log "downloading WaterWall ${WW_VERSION} (${variant}, ${asset})"
+    curl -fsSL --retry 3 -o "$dir/ww.zip" "$url"
+    actual="$(sha256sum "$dir/ww.zip" | awk '{print $1}')"
+    [[ "$actual" == "$zip_expected" ]] || die "checksum mismatch for WaterWall zip (expected $zip_expected, got $actual)"
+    unzip -q -o "$dir/ww.zip" Waterwall -d "$dir"
+    install -m 0755 "$dir/Waterwall" /usr/local/bin/waterwall
+    record_binary_provenance waterwall /usr/local/bin/waterwall
+    rm -rf "$dir"
+  fi
 
   self="${WW_SELF:-$(ip -4 -o addr show dev "$(default_iface)" | awk '{split($4,a,"/"); print a[1]; exit}')}"
   [[ -n "$self" ]] || die "waterwall: cannot detect this server's IP; pass --ww-self"
@@ -586,6 +618,7 @@ install_waterwall() {
 
 install_relay() {
   [[ -n "$WW_PEER" ]] || die "relay role needs --ww-peer IP (the exit)"
+  ensure_shahrah_cli || die "CLI bootstrap failed"
   [[ "$FIREWALL" -eq 0 ]] || { detect_ssh_port; ufw allow "${SSH_PORT}/tcp" >/dev/null; ufw --force enable >/dev/null; }
   # Same BBR / tcp_mtu_probing as the exit: IRAN->EXIT often has MTU 1400 overlays; without
   # probing, large TLS records (feed images, 2 MB probes) black-hole after the handshake.
@@ -781,22 +814,24 @@ EOF
 
 write_install_manifest() {
   install -d -m 0700 -o root -g root /var/lib/shahrah
+  ensure_shahrah_cli || die "CLI bootstrap failed (manifest)"
   detect_ssh_port
   local ports=""
   if [[ -f "$CONF_DIR/state.json" ]]; then
-    ports="$(shahrah --state "$CONF_DIR/state.json" listener list 2>/dev/null | awk '{print $1}' | paste -sd, -)"
+    ports="$(shahrah_cli --state "$CONF_DIR/state.json" listener list 2>/dev/null | awk '{print $1}' | paste -sd, -)"
   fi
-  shahrah print install-manifest --ssh-port "$SSH_PORT" ${ports:+--public-ports "$ports"} \
+  shahrah_cli print install-manifest --ssh-port "$SSH_PORT" ${ports:+--public-ports "$ports"} \
     >"$INSTALL_MANIFEST"
   chmod 0600 "$INSTALL_MANIFEST"
 }
 
 detect_ssh_port() {
   if [[ -n "$SSH_PORT" ]]; then return; fi
+  local -a _ssh_ports=()
   if command -v sshd >/dev/null; then
-    SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
+    mapfile -t _ssh_ports < <(sshd -T 2>/dev/null | awk '/^port /{print $2}')
   fi
-  SSH_PORT="${SSH_PORT:-22}"
+  SSH_PORT="${_ssh_ports[0]:-22}"
 }
 
 setup_firewall() {

@@ -39,9 +39,14 @@ scp /etc/shahrah/backhaul.key root@<IRAN_IPV4>:/etc/shahrah/backhaul.key
 ## Iran (partial install OK: venv, waterwall binary, 99-shahrah.conf)
 
 ```bash
-cd /opt/shahrah && git reset --hard <MERGED_SHA>
-sudo SHAHRAH_WHEELHOUSE=/opt/wheelhouse EXIT_PEER_IP=<NL_IPV4> ./deploy/beta/iran-relay-install.sh
+cd /opt/shahrah && git fetch origin && git merge --ff-only origin/main   # no reset --hard
+sudo SHAHRAH_WHEELHOUSE=/opt/wheelhouse WW_CPU_VARIANT=old-cpu EXIT_PEER_IP=<NL_IPV4> \
+  ./deploy/beta/iran-relay-install.sh
 ```
+
+On Xeon without AVX2, `auto` selects the official `*-gcc-x64-old-cpu` zip (zip checksum verified
+on download). Re-runs skip download only when `/etc/shahrah/waterwall-cpu.variant` matches and the
+installed ELF matches the pinned **binary** digest (not the zip).
 
 Re-run is idempotent (re-downloads WaterWall if needed, restarts unit).
 
