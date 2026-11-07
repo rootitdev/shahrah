@@ -7,6 +7,7 @@
 # Usage (on Iran):
 #   sudo EXIT_PEER_IP=<NL_IPV4> ./deploy/beta/iran-relay-install.sh
 # Offline pip: SHAHRAH_WHEELHOUSE=/opt/wheelhouse (setuptools/wheel + shahrah sdist/wheel preseeded)
+# Old CPU (no AVX2): WW_CPU_VARIANT=old-cpu or auto (persisted in /etc/shahrah/waterwall-cpu.variant)
 # After Germany copied backhaul.key to /etc/shahrah/backhaul.key on Iran.
 set -euo pipefail
 
