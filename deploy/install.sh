@@ -6,6 +6,9 @@
 #
 #   sudo ./deploy/install.sh --host vpn.example.org --target www.cloudflare.com
 #
+# Shell continuation: end a line with backslash (\) before a newline, then the next flag
+# on its own line — otherwise the shell treats --target as a command (not a shahrah bug).
+#
 # Secrets (REALITY private key, user ids) are generated on the machine and never leave it.
 set -Eeuo pipefail
 
@@ -66,6 +69,10 @@ WW_COVER_SNI="www.speedtest.net"
 WW_COVER_ADDR=""
 WORK_DIR=""
 PREINSTALL_SNAP="/var/lib/shahrah/preinstall.snapshot"
+EXPLICIT_HOST=0
+EXPLICIT_TARGET=0
+EXPLICIT_MULTI=0
+INSTALL_MANIFEST="/var/lib/shahrah/install-manifest.json"
 trap '[[ -z "$WORK_DIR" ]] || rm -rf "$WORK_DIR"' EXIT
 
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -109,13 +116,13 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --role) ROLE="${2:?--role needs a value}"; shift 2 ;;
-      --host) HOST="${2:?--host needs a value}"; shift 2 ;;
-      --target) TARGET="${2:?--target needs a value}"; shift 2 ;;
+      --host) EXPLICIT_HOST=1; HOST="${2:?--host needs a value}"; shift 2 ;;
+      --target) EXPLICIT_TARGET=1; TARGET="${2:?--target needs a value}"; shift 2 ;;
       --profile) PROFILE="${2:?--profile needs a value}"; shift 2 ;;
       --port) PORT="${2:?--port needs a value}"; shift 2 ;;
       --extra-listener) EXTRA_LISTENERS+=("${2:?--extra-listener needs PORT:PROFILE}"); shift 2 ;;
       # Port-80 REALITY+XHTTP fails on current Xray (loopback timeout); keep 53 only.
-      --multi-port) EXTRA_LISTENERS+=("53:reality-xhttp"); shift ;;
+      --multi-port) EXPLICIT_MULTI=1; EXTRA_LISTENERS+=("53:reality-xhttp"); shift ;;
       --ssh-port) SSH_PORT="${2:?--ssh-port needs a value}"; shift 2 ;;
       --no-firewall) FIREWALL=0; shift ;;
       --with-paqet) WITH_PAQET=1; PAQET_PORT="${2:?--with-paqet needs a PORT}"; shift 2 ;;
@@ -535,6 +542,7 @@ install_relay() {
   install_waterwall
   # Optional crisis path on the Iran box itself (same paqet key as the exit, or its own).
   [[ "$WITH_PAQET" -eq 0 ]] || install_paqet
+  write_install_manifest
   log "relay ready: users keep their exit REALITY links, pointed at this server's IP"
 }
 
@@ -619,6 +627,17 @@ init_node() {
   done
   if [[ -f "$state" ]]; then
     log "keeping existing node state ($state)"
+    local reconf=() snap
+    [[ "$EXPLICIT_HOST" -eq 1 ]] && reconf+=(--public-host "$HOST")
+    [[ "$EXPLICIT_TARGET" -eq 1 ]] && reconf+=(--target "$TARGET")
+    [[ "$EXPLICIT_MULTI" -eq 1 ]] && reconf+=(--add-multi-port)
+    if [[ ${#reconf[@]} -gt 0 ]]; then
+      install -d -m 0700 -o root -g root /var/lib/shahrah
+      snap="/var/lib/shahrah/reconfigure-$(date +%s).json"
+      reconf+=(--snapshot "$snap")
+      log "applying explicit installer flags (keys/users preserved; snapshot ${snap})"
+      shahrah --state "$state" reconfigure "${reconf[@]}"
+    fi
   else
     log "generating REALITY keys on this machine"
     shahrah --state "$state" init --host "$HOST" --target "$TARGET" \
@@ -696,6 +715,12 @@ EOF
   fi
 }
 
+write_install_manifest() {
+  install -d -m 0700 -o root -g root /var/lib/shahrah
+  shahrah print install-manifest >"$INSTALL_MANIFEST"
+  chmod 0600 "$INSTALL_MANIFEST"
+}
+
 detect_ssh_port() {
   if [[ -n "$SSH_PORT" ]]; then return; fi
   if command -v sshd >/dev/null; then
@@ -740,6 +765,7 @@ main() {
   install_cf_origin_allowlist
   [[ "$WITH_WARP" -eq 0 ]] || install_warp
   [[ -z "$WW_SIDE" ]] || install_waterwall
+  write_install_manifest
 
   log "done. Client link for user 'first' (keep it private):"
   shahrah --state "$CONF_DIR/state.json" link first

@@ -98,3 +98,64 @@ sudo DURATION_SEC=300 ./deploy/beta/stability-check.sh
 ## Ubuntu 26.04
 
 در VM agent تست نشد؛ preflight شما 26.04 + Python≥3.11 را تأیید کرد. WaterWall e2e فقط در pytest/lab (بدون باینری زنده در CI).
+
+---
+
+## ارتقا / بازپیکربندی روی state موجود (PR بتا — نه `main`)
+
+روی خروج تست **185.19.33.221** اگر `state.json` از قبل هست و فقط `--host` / `--target` / `--multi-port` می‌دهید، دیگر نادیده گرفته نمی‌شود:
+
+```bash
+sudo ./deploy/install.sh \
+  --host 185.19.33.221 \
+  --target www.cloudflare.com
+```
+
+برای شکستن خط در shell حتماً `\` آخر خط باشد؛ وگرنه `--target: command not found` خطای **shell** است نه شاهراه.
+
+`--multi-port` فقط وقتی صریحاً بزنید listener **53** اضافه می‌کند (ممکن است stub `systemd-resolved` غیرفعال شود؛ DNS سیستم را قبلش بدانید).
+
+آرتیفکت این PR را از Actions/بستهٔ `package-beta-release.sh` بگیرید؛ **`origin/main` هنوز این رفتار را ندارد.**
+
+## چند خروج هم‌زمان از یک ایران (de + tr)
+
+هر **نام** = یک WaterWall جدا + پورت کاربر روی ایران + کلید backhaul خودش. کلاینت روی **همان exit** لینک می‌گیرد:
+
+```bash
+# ایران
+sudo shahrah relay peer-add --name de --exit-ip <EXIT1_IPV4> --user-port 443 \
+  --tunnel-port 8443 --iran-ip <IRAN_IPV4> --entry-host <IRAN_IPV4>
+sudo shahrah relay print-unit > /etc/systemd/system/shahrah-waterwall@.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now shahrah-waterwall@de
+
+# دوم (مثال ترکیه — IP را خودتان بگذارید، نه مقدار ساختگی در ریپو)
+sudo shahrah relay peer-add --name tr --exit-ip <EXIT2_IPV4> --user-port 4430 \
+  --tunnel-port 9453 --iran-ip <IRAN_IPV4> --entry-host <IRAN_IPV4>
+sudo systemctl enable --now shahrah-waterwall@tr
+```
+
+روی **exit1**:
+
+```bash
+shahrah link USER --entry-host <IRAN_IPV4> --entry-port 443
+```
+
+روی **exit2**:
+
+```bash
+shahrah link USER --entry-host <IRAN_IPV4> --entry-port 4430
+```
+
+**PasarGuard:** هویت کاربر روی هر exit جدا است؛ sync خودکار UUID بین exitها وعده داده نشده است.
+
+## ویزارد ترمینال و حذف امن
+
+```bash
+sudo ./deploy/shahrah-wizard.sh          # فقط TTY تعاملی
+NO_COLOR=1 sudo ./deploy/install.sh ... # بدون رنگ
+sudo ./deploy/uninstall-shahrah.sh --dry-run
+sudo ./deploy/uninstall-shahrah.sh --purge --backup /root/shahrah-backups --yes
+```
+
+`uninstall` هرگز SSH یا ufw سراسری را reset نمی‌کند.

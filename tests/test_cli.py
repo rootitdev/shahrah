@@ -24,6 +24,37 @@ def init(state: Path) -> None:
     assert run(state, "init", "--host", "vpn.example.org", "--target", "www.cloudflare.com") == 0
 
 
+def test_reconfigure_updates_host_without_rotating_keys(
+    state_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    init(state_file)
+    priv = load_state(state_file).private_key
+    assert (
+        run(
+            state_file,
+            "reconfigure",
+            "--public-host",
+            "198.51.100.221",
+            "--target",
+            "www.cloudflare.com",
+        )
+        == 0
+    )
+    st = load_state(state_file)
+    assert st.public_host == "198.51.100.221"
+    assert st.private_key == priv
+    assert "preserved" in capsys.readouterr().out
+
+
+def test_uninstall_plan_json_paths_are_scoped(
+    state_file: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run(state_file, "uninstall-plan", "--purge", "--json") == 0
+    data = json.loads(capsys.readouterr().out)
+    assert "/etc/shahrah" in data["paths"]
+    assert all(not str(p).startswith("/etc/ssh") for p in data["paths"])
+
+
 def test_init_refuses_to_overwrite_without_force(
     state_file: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

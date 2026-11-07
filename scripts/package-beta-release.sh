@@ -63,6 +63,10 @@ rollback=deploy/rollback-install.sh
 control_plane=shahrah brain only (do not enable vpn-infra-kit failover on same host)
 panels_beta=do not install settle/ig; SHAHRAH_BETA=1 if using install-panels.sh
 iran_relay=deploy/beta/iran-relay-install.sh + BETA-OPS-RUNBOOK-fa.md
+wizard=deploy/shahrah-wizard.sh
+uninstall=deploy/uninstall-shahrah.sh
+multi_exit=shahrah relay peer-add/list/remove/render
+reconfigure_existing=install.sh explicit --host/--target/--multi-port
 backup=scripts/backup-shahrah-bundle.sh + restore-shahrah-drill.sh
 build_meta=${REL}-BUILD.json
 manifest=${REL}.sha256.manifest

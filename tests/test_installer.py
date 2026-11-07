@@ -10,6 +10,8 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "install.sh"
 ATTACH = Path(__file__).resolve().parent.parent / "deploy" / "attach-domain.sh"
 ROOTIT = Path(__file__).resolve().parent.parent / "deploy" / "install-rootit.sh"
+UNINSTALL = Path(__file__).resolve().parent.parent / "deploy" / "uninstall-shahrah.sh"
+WIZARD = Path(__file__).resolve().parent.parent / "deploy" / "shahrah-wizard.sh"
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +59,7 @@ def test_bash_accepts_the_syntax() -> None:
     bash = _find_bash()
     if bash is None:
         pytest.skip("bash not available")
-    for script in (SCRIPT, ATTACH, ROOTIT):
+    for script in (SCRIPT, ATTACH, ROOTIT, UNINSTALL, WIZARD):
         try:
             result = subprocess.run(
                 [bash, "-n", str(script)], capture_output=True, check=False, timeout=20
@@ -98,8 +100,16 @@ def test_brain_role_keeps_secrets_out_of_the_world_readable_tree(text: str) -> N
     assert "ufw" not in section  # the brain opens no ports
 
 
+def test_existing_state_honours_explicit_installer_flags(text: str) -> None:
+    assert "EXPLICIT_HOST=0" in text
+    assert "reconfigure" in text
+    assert "keys/users preserved" in text
+    assert "backslash" in text.lower() or "continuation" in text.lower()
+
+
 def test_multi_port_options_reach_the_node_and_port_53_is_freed_first(text: str) -> None:
-    assert "--multi-port) EXTRA_LISTENERS+=(" in text
+    assert "EXPLICIT_MULTI=1" in text
+    assert 'EXTRA_LISTENERS+=("53:reality-xhttp")' in text
     assert "--extra-listener) EXTRA_LISTENERS+=(" in text
     assert 'extra+=(--extra-listener "$spec")' in text
     body = text[text.index("main() {") :]

@@ -291,6 +291,10 @@ class NodeState:
             validate_host(client_host, "client host")
         return replace(self, client_host=client_host)
 
+    def with_public_host(self, public_host: str) -> NodeState:
+        validate_host(public_host, "public host")
+        return replace(self, public_host=public_host)
+
     def with_target(self, target_host: str) -> NodeState:
         """Point REALITY at a different TLS 1.3 site (the public SNI clients dial)."""
         validate_host(target_host, "REALITY target host")
