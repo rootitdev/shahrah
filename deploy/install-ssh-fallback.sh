@@ -45,9 +45,9 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=AUTOSSH_GATETIME=0
-ExecStart=/usr/bin/autossh -M 0 -N -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\
+ExecStart=/usr/bin/autossh -M 0 -N -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 \\
   -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new \\
-  -L ${LOCAL_PORT}:${REMOTE_BIND}:${REMOTE_PORT} ${RUSER}@${PEER}
+  -L 127.0.0.1:${LOCAL_PORT}:${REMOTE_BIND}:${REMOTE_PORT} ${RUSER}@${PEER}
 Restart=always
 RestartSec=5
 
@@ -55,6 +55,7 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
+ssh-keyscan -H "$PEER" >>/root/.ssh/known_hosts 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable --now shahrah-ssh-fallback
 log "listening 127.0.0.1:${LOCAL_PORT} -> ${PEER}:${REMOTE_BIND}:${REMOTE_PORT}"
