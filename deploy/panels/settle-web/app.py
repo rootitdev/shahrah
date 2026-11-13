@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import sqlite3
+import ssl
 import subprocess
 import threading
 import time
@@ -419,15 +420,54 @@ def log_sms(
         conn.close()
 
 
-def list_sms(limit: int = 30) -> list[dict]:
+def list_sms(limit: int = 30, *, offset: int = 0) -> list[dict]:
     conn = db()
     try:
         rows = conn.execute(
             "SELECT id, ts, sender, amount, when_s, account, status, admin_id, detail "
-            "FROM sms_inbox ORDER BY ts DESC LIMIT ?",
-            (limit,),
+            "FROM sms_inbox ORDER BY ts DESC LIMIT ? OFFSET ?",
+            (max(1, min(100, int(limit))), max(0, int(offset))),
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def sms_inbox_count() -> int:
+    conn = db()
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM sms_inbox").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def clear_sms_inbox(*, older_than_days: int | None = None) -> int:
+    """Delete SMS log rows. older_than_days=None → all; else keep recent days."""
+    conn = db()
+    try:
+        if older_than_days is None:
+            n = conn.execute("SELECT COUNT(*) FROM sms_inbox").fetchone()[0]
+            conn.execute("DELETE FROM sms_inbox")
+        else:
+            cutoff = time.time() - max(0, int(older_than_days)) * 86400
+            n = conn.execute(
+                "SELECT COUNT(*) FROM sms_inbox WHERE ts < ?", (cutoff,)
+            ).fetchone()[0]
+            conn.execute("DELETE FROM sms_inbox WHERE ts < ?", (cutoff,))
+        return int(n)
+    finally:
+        conn.close()
+
+
+def delete_sms_ids(ids: list[int]) -> int:
+    ids = [int(x) for x in ids if int(x) > 0]
+    if not ids:
+        return 0
+    conn = db()
+    try:
+        q = ",".join("?" * len(ids))
+        cur = conn.execute(f"DELETE FROM sms_inbox WHERE id IN ({q})", ids)
+        return int(cur.rowcount or 0)
     finally:
         conn.close()
 
@@ -736,14 +776,19 @@ def _public_panel_base(req_host: str = "", forwarded_proto: str = "") -> str:
         env = _parse_env(path)
         for k in ("PANEL_BASE", "URL", "PANEL_BASE_URL"):
             v = (env.get(k) or "").strip().rstrip("/")
-            if v.startswith("http"):
-                # URL may be .../settle/ — strip path suffix
-                for suf in ("/settle", "/pay"):
-                    if v.endswith(suf):
-                        v = v[: -len(suf)]
-                return v
+            if not v.startswith("http"):
+                continue
+            # Never publish loopback as SMS webhook / public links (phones need the real domain).
+            if "127.0.0.1" in v or "localhost" in v:
+                continue
+            # URL may be .../settle/ — strip path suffix
+            for suf in ("/settle", "/pay"):
+                if v.endswith(suf):
+                    v = v[: -len(suf)]
+            return v
     remote = _panel_remote_base()
-    if remote:
+    # Never publish loopback API URLs as customer/admin SMS webhooks (phones need public host).
+    if remote and "127.0.0.1" not in remote and "localhost" not in remote:
         return remote
     host = (req_host or "").split(",")[0].strip()
     if host and "127.0.0.1" not in host and "localhost" not in host:
@@ -751,7 +796,8 @@ def _public_panel_base(req_host: str = "", forwarded_proto: str = "") -> str:
         return f"{proto}://{host}"
     raise RuntimeError(
         "PANEL_BASE must be set in /root/.vpn-secrets/settle-web.env or "
-        "/etc/settle-web/panel.env (no hardcoded production panel URL)"
+        "/etc/settle-web/panel.env to the public site "
+        "(e.g. https://add.sadaftech.ir) — not https://127.0.0.1"
     )
 
 
@@ -802,7 +848,11 @@ def _panel_http(path: str, *, timeout: int = 45) -> dict | list:
     except Exception:
         pass
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        ctx = ssl.create_default_context()
+        if "127.0.0.1" in url or "localhost" in url:
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             raw = resp.read().decode("utf-8", "replace")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
@@ -3236,6 +3286,13 @@ body.ro .pay-box.on { display:block; }
   </section>
   <section class="card">
     <h2>آخرین پیامک‌ها</h2>
+    <div class="row" style="gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <button class="ghost" id="sms-prev" type="button">قبلی</button>
+      <span class="mut" id="sms-page-label">صفحه ۱</span>
+      <button class="ghost" id="sms-next" type="button">بعدی</button>
+      <button class="danger" id="sms-clear-old" type="button">حذف قدیمی‌تر از ۳۰ روز</button>
+      <button class="danger" id="sms-clear-all" type="button">حذف همه گزارش‌ها</button>
+    </div>
     <div id="sms-log"></div>
   </section>
 </div>
@@ -4175,8 +4232,9 @@ function fillBrandForm(d){
   if ($('brand-phone')) $('brand-phone').value = d.pay_support_phone || b.support_phone || '';
   if ($('brand-tg')) $('brand-tg').value = d.pay_support_telegram || b.support_telegram || '';
 }
+let smsPage = 1;
 async function loadSettings(){
-  const d = await api('api/settings');
+  const d = await api('api/settings?sms_page=' + smsPage + '&sms_page_size=20');
   if (!d) return;
   fillBrandForm(d);
   $('sms-enabled').checked = !!d.sms_enabled;
@@ -4186,17 +4244,49 @@ async function loadSettings(){
   $('sms-tg').checked = !!d.sms_notify_telegram;
   $('sms-url').textContent = d.webhook_url || '';
   $('sms-token').textContent = d.sms_token || '';
+  smsPage = d.sms_page || smsPage;
+  if ($('sms-page-label')) {
+    $('sms-page-label').textContent = 'صفحه ' + (d.sms_page||1) + ' از ' + (d.sms_pages||1) + ' · ' + (d.sms_total||0) + ' رکورد';
+  }
+  if ($('sms-prev')) $('sms-prev').disabled = (d.sms_page||1) <= 1;
+  if ($('sms-next')) $('sms-next').disabled = (d.sms_page||1) >= (d.sms_pages||1);
   const box = $('sms-log');
   if (!d.recent || !d.recent.length) box.innerHTML = '<div class="empty">هنوز پیامکی نیامده.</div>';
-  else box.innerHTML = `<table><thead><tr><th>زمان</th><th>فرستنده</th><th>مبلغ</th><th>وضعیت</th><th>توضیح</th></tr></thead><tbody>${
+  else box.innerHTML = `<table><thead><tr><th></th><th>زمان</th><th>فرستنده</th><th>مبلغ</th><th>وضعیت</th><th>توضیح</th></tr></thead><tbody>${
     d.recent.map(r => `<tr>
+      <td><button class="danger sms-del-one" type="button" data-id="${r.id}" style="padding:4px 8px;font-size:11px">حذف</button></td>
       <td>${new Date(r.ts*1000).toLocaleString('fa-IR')}</td>
       <td>${esc(r.sender)}</td>
       <td class="num">${r.amount!=null ? Number(r.amount).toLocaleString('fa-IR') : '-'}</td>
       <td>${esc(r.status)}</td>
       <td class="mut" style="font-size:12px">${esc(r.detail||'')}${r.admin_id?(' · #'+r.admin_id):''}</td>
     </tr>`).join('')}</tbody></table>`;
+  box.querySelectorAll('.sms-del-one').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('این گزارش حذف شود؟')) return;
+      try {
+        await api('api/sms/clear', {ids: [Number(btn.getAttribute('data-id'))]});
+        flash('حذف شد.', 'ok'); loadSettings();
+      } catch (e) { flash(e.message, 'err'); }
+    };
+  });
 }
+$('sms-prev') && ($('sms-prev').onclick = () => { if (smsPage > 1) { smsPage -= 1; loadSettings(); } });
+$('sms-next') && ($('sms-next').onclick = () => { smsPage += 1; loadSettings(); });
+$('sms-clear-old') && ($('sms-clear-old').onclick = async () => {
+  if (!confirm('گزارش‌های قدیمی‌تر از ۳۰ روز حذف شوند؟')) return;
+  try {
+    const d = await api('api/sms/clear', {older_than_days: 30});
+    flash((d.deleted||0) + ' رکورد حذف شد.', 'ok'); smsPage = 1; loadSettings();
+  } catch (e) { flash(e.message, 'err'); }
+});
+$('sms-clear-all') && ($('sms-clear-all').onclick = async () => {
+  if (!confirm('همه گزارش‌های پیامک حذف شوند؟ این کار برنمی‌گردد.')) return;
+  try {
+    const d = await api('api/sms/clear', {all: true});
+    flash((d.deleted||0) + ' رکورد حذف شد.', 'ok'); smsPage = 1; loadSettings();
+  } catch (e) { flash(e.message, 'err'); }
+});
 $('brand-save') && ($('brand-save').onclick = async () => {
   try {
     await api('api/settings', {
@@ -4305,13 +4395,23 @@ PAGES = {"/", "/index.html", "/docs", "/settings", "/monthly", "/costs", "/waive
 PAY_PAGES = {"/pay", "/pay/"}
 
 
-def settings_payload(req_host: str = "", forwarded_proto: str = "") -> dict:
+def settings_payload(
+    req_host: str = "",
+    forwarded_proto: str = "",
+    *,
+    sms_page: int = 1,
+    sms_page_size: int = 20,
+) -> dict:
     cfg = sms_settings()
     brand = pay_brand_public()
     # Always show the public nginx URL phones must use (not loopback).
     origin = _public_panel_base(req_host, forwarded_proto)
     base = f"{origin}/settle"
     token = cfg["sms_token"]
+    page = max(1, int(sms_page or 1))
+    size = max(5, min(50, int(sms_page_size or 20)))
+    total = sms_inbox_count()
+    offset = (page - 1) * size
     return {
         "sms_enabled": cfg.get("sms_enabled") == "1",
         "sms_senders": cfg.get("sms_senders") or "",
@@ -4320,7 +4420,11 @@ def settings_payload(req_host: str = "", forwarded_proto: str = "") -> dict:
         "sms_notify_telegram": cfg.get("sms_notify_telegram") != "0",
         "sms_token": token,
         "webhook_url": f"{base}/api/sms?token={token}",
-        "recent": list_sms(25),
+        "recent": list_sms(size, offset=offset),
+        "sms_total": total,
+        "sms_page": page,
+        "sms_page_size": size,
+        "sms_pages": max(1, (total + size - 1) // size),
         "brand": brand,
         "pay_top_bar": brand.get("top_bar") or "",
         "pay_slogan": brand.get("slogan") or "",
@@ -4537,7 +4641,14 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 host = self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or ""
                 proto = self.headers.get("X-Forwarded-Proto") or ""
-                self._ok(settings_payload(host, proto))
+                self._ok(
+                    settings_payload(
+                        host,
+                        proto,
+                        sms_page=as_int((q.get("sms_page") or ["1"])[0], 1),
+                        sms_page_size=as_int((q.get("sms_page_size") or ["20"])[0], 20),
+                    )
+                )
                 return
             if path == "/api/monthly":
                 months = as_int((q.get("months") or ["12"])[0], 12)
@@ -5003,6 +5114,23 @@ class Handler(BaseHTTPRequestHandler):
                         payload.update(data["brand"])
                     save_pay_brand_settings(payload)
                 self._ok(settings_payload(host, proto))
+                return
+            if path == "/api/sms/clear":
+                if not is_op:
+                    self._fail("دسترسی ندارید.", 403)
+                    return
+                if data.get("all"):
+                    deleted = clear_sms_inbox()
+                elif data.get("ids"):
+                    deleted = delete_sms_ids(list(data.get("ids") or []))
+                elif data.get("older_than_days") is not None:
+                    deleted = clear_sms_inbox(
+                        older_than_days=as_int(data.get("older_than_days"), 30)
+                    )
+                else:
+                    self._fail("پارامتر حذف نامعتبر است.")
+                    return
+                self._ok({"ok": True, "deleted": deleted, "message": f"{deleted} گزارش حذف شد."})
                 return
         except ValueError as e:
             self._fail(str(e), 400)
