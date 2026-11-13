@@ -604,6 +604,7 @@ def _panel_request(method: str, path: str, body: dict | None = None) -> dict:
     url = base.rstrip("/") + path
     cmd = [
         "curl",
+        "-k",  # MASTER_PANEL_URL may be https://127.0.0.1 with panel cert for public host
         "-4",
         "-sS",
         "--max-time",
