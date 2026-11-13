@@ -281,6 +281,16 @@ def _watch_panel_uid(email: str, label: str, aliases: str) -> str:
     return ""
 
 
+def _aliases_for_ui(aliases: str) -> str:
+    """Panel ids only — UUIDs stay in DB for matching, not shown in the UI."""
+    seen: list[str] = []
+    for part in (aliases or "").split(","):
+        p = part.strip()
+        if p.isdigit() and p not in seen:
+            seen.append(p)
+    return ",".join(seen)
+
+
 def _enrich_client(email: str, label: str, enabled: bool, aliases: str) -> dict:
     uid = _watch_panel_uid(email, label, aliases)
     st_map = _panel_status()
@@ -300,7 +310,7 @@ def _enrich_client(email: str, label: str, enabled: bool, aliases: str) -> dict:
         "email": email,
         "label": label,
         "enabled": enabled,
-        "aliases": aliases,
+        "aliases": _aliases_for_ui(aliases),
         "panel_id": uid,
         "panel_status": raw_status,
         "status_label": label_fa,
@@ -853,7 +863,7 @@ function renderWatch(list){
     const nameCls = (w.panel_status==='missing') ? 'name-missing' : '';
     const pid = w.panel_id ? ('id=' + w.panel_id + ' · ') : '';
     return `<div class="${rowCls}">
-    <div><b class="${nameCls}">${esc(w.label)}</b><div class="mut id">${pid}${esc(w.email)}${w.aliases ? '<br>' + esc(w.aliases) : ''}</div></div>
+    <div><b class="${nameCls}">${esc(w.label)}</b><div class="mut id">${pid}${esc(w.email)}</div></div>
     <div class="row" style="flex:0 0 auto;align-items:center">
       <span class="pill ${esc(w.status_class || 'st-unknown')}">${esc(w.status_label || '?')}</span>
       <span class="pill ${w.enabled?'on':'off'}">${w.enabled?'دیده‌بان روشن':'دیده‌بان خاموش'}</span>

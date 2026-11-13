@@ -321,6 +321,45 @@ def make_panel_client(config: RootitConfig, *, api_key: str | None = None) -> Pa
     )
 
 
+def pin_key_ci(config: RootitConfig, username: str) -> str | None:
+    """Return the stored pin username matching ``username`` case-insensitively."""
+    wanted = username.casefold()
+    for name in config.pins:
+        if name.casefold() == wanted:
+            return name
+    return None
+
+
+def resolve_panel_username(client: PanelClient, username: str) -> str:
+    """Resolve typed username to the exact PasarGuard username (case-insensitive)."""
+    if not _USER_RE.fullmatch(username):
+        raise ConfigError("invalid username")
+    try:
+        client.get_user(username)
+        return username
+    except PanelError as exc:
+        if "404" not in str(exc):
+            raise ConfigError(f"خطای پنل پاسارگارد: {exc}") from exc
+    wanted = username.casefold()
+    offset = 0
+    page_size = 100
+    while offset < 5000:
+        data = client.list_users(offset=offset, limit=page_size)
+        users = data.get("users", []) if isinstance(data, dict) else []
+        if not isinstance(users, list) or not users:
+            break
+        for row in users:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("username") or "")
+            if name.casefold() == wanted:
+                return name
+        if len(users) < page_size:
+            break
+        offset += page_size
+    raise ConfigError("کاربر در پنل پاسارگارد پیدا نشد")
+
+
 def resolve_subscription_url(
     client: PanelClient, config: RootitConfig, username: str
 ) -> tuple[str, dict[str, Any]]:
@@ -328,7 +367,8 @@ def resolve_subscription_url(
     if not _USER_RE.fullmatch(username):
         raise ConfigError("invalid username")
     try:
-        user = client.get_user(username)
+        canonical = resolve_panel_username(client, username)
+        user = client.get_user(canonical)
     except PanelError as exc:
         msg = str(exc)
         if "404" in msg:
@@ -358,7 +398,7 @@ def _page(title: str, body: str, *, status_msg: str = "", wide: bool = False) ->
 <meta name="robots" content="noindex,nofollow">
 <title>{_html_escape(title)}</title>
 <style>
-:root{{--bg:#0f1419;--card:#1a222c;--fg:#e7eef7;--muted:#9aa8b6;--acc:#3d9cf0;--err:#e35d6a;--ok:#3ecf8e}}
+:root{{--bg:#0f1419;--card:#1a222c;--fg:#e7eef7;--muted:#9aa8b6;--acc:#3d9cf0;--err:#e35d6a;--ok:#3ecf8e;--warn:#f6c453}}
 *{{box-sizing:border-box}}body{{margin:0;font:15px/1.55 system-ui,Tahoma,sans-serif;background:var(--bg);color:var(--fg)}}
 main{{max-width:420px;margin:8vh auto;padding:1.25rem}}main.wide{{max-width:720px}}
 h1{{font-size:1.15rem;margin:0 0 .75rem;font-weight:650}}
@@ -383,6 +423,7 @@ td.pin,th.pin{{direction:ltr;text-align:left;font-family:ui-monospace,Consolas,m
 .pager{{display:flex;gap:.5rem;align-items:center;justify-content:space-between;margin-top:1rem;flex-wrap:wrap}}
 .btn.secondary{{background:#2c3846;color:var(--fg)}}
 .btn.small{{margin-top:0;padding:.35rem .55rem;font-size:.8rem}}
+.pin-note{{color:var(--warn);font-weight:650;font-size:.95rem;margin:1rem 0 .35rem;padding:.55rem .7rem;line-height:1.45;background:rgba(246,196,83,.14);border:1px solid rgba(246,196,83,.45);border-radius:8px}}
 </style>
 </head>
 <body><main{main_class}><div class="card"><h1>{_html_escape(title)}</h1>{banner}{body}</div></main></body></html>"""
@@ -423,7 +464,7 @@ def _user_result(*, username: str, url: str, apology: str, pin: str) -> bytes:
     body = f"""
 <p>{_html_escape(apology)}</p>
 <p class="muted">کاربر: <b>{_html_escape(username)}</b></p>
-<p class="muted" style="margin-top:1rem">رمز ورود شما (یادداشت کنید — برای دفعات بعد لازم است):</p>
+<p class="pin-note">رمز ورود شما (یادداشت کنید — برای دفعات بعد لازم است):</p>
 <div class="pinbig" id="pinbox">{_html_escape(pin)}</div>
 <div class="row"><button type="button" class="btn secondary" id="copypin">کپی رمز</button></div>
 <p class="muted" style="margin-top:1.2rem">لینک اشتراک:</p>
@@ -836,8 +877,9 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     400,
                     _user_form(require_password=cfg.require_password, error="نام کاربری نامعتبر"),
                 )
+            pin_name = pin_key_ci(cfg, username) or username
             if cfg.require_password:
-                encoded = cfg.pins.get(username, "")
+                encoded = cfg.pins.get(pin_name, "")
                 if not encoded or not verify_password(password, encoded):
                     return self._send(
                         403,
@@ -845,9 +887,10 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     )
             try:
                 client = make_panel_client(cfg)
-                url, _user = resolve_subscription_url(client, cfg, username)
-                cfg2, pin = ensure_user_pin(cfg, username)
-                if cfg2 is not cfg or cfg.pins.get(username) != cfg2.pins.get(username):
+                url, user = resolve_subscription_url(client, cfg, username)
+                canonical = str(user.get("username") or pin_name)
+                cfg2, pin = ensure_user_pin(cfg, canonical)
+                if cfg2 is not cfg or cfg.pins.get(canonical) != cfg2.pins.get(canonical):
                     save_config(config_path, cfg2)
             except ConfigError as exc:
                 return self._send(
@@ -856,7 +899,7 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                 )
             return self._send(
                 200,
-                _user_result(username=username, url=url, apology=cfg2.apology, pin=pin),
+                _user_result(username=canonical, url=url, apology=cfg2.apology, pin=pin),
             )
 
     return Handler

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Emergency SSH backhaul when WaterWall reverse leg is down.
+# Thin emergency SSH L-forward when WaterWall reverse leg is down (ops smoke tests).
+# Production client traffic should use vpn-infra-kit TO-NL-SSH / TO-AMS-SSH SOCKS paths
+# (see vpn-infra-kit/docs/SSH-PATH.md) — not this port-forward alone.
 # Runs on IRAN: autossh -> NL, forwards localhost:127.0.0.1:10443 -> NL:127.0.0.1:443
-# (PasarGuard Xray on the exit). Operators can point a temporary PasarGuard host to
-# 127.0.0.1:10443 from Iran-side tooling, or use this for manual curl/smoke tests.
 #
 # Usage (on Iran, as root):
 #   export SSH_FALLBACK_PEER=185.19.33.221

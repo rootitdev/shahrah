@@ -788,7 +788,7 @@ def _panel_http(path: str, *, timeout: int = 45) -> dict | list:
     try:
         cp = subprocess.run(
             [
-                "curl", "-4", "-sS", "--max-time", str(timeout),
+                "curl", "-k", "-4", "-sS", "--max-time", str(timeout),
                 "-H", f"X-API-Key: {key}",
                 "-H", "Accept: application/json",
                 url,
