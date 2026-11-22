@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>سامانه جامع فروش تجهیزات لپ تاپ</title>
+<meta name="description" content="سامانه جامع فروش تجهیزات لپ تاپ">
+<style>
+@font-face{
+  font-family:'IRANYekanX';
+  src:url('static/IRANYekanX-Medium.woff2') format('woff2');
+  font-weight:500;font-style:normal;font-display:swap;
+}
+:root{
+  --bg:#0b1220;--card:#121a2b;--line:#243049;--txt:#e8eefc;--mut:#93a0b8;
+  --acc:#3b82f6;--ok:#34d399;--hi:#f87171;--soft:#1a2740;
+  --inp:#0d1526;--glow:rgba(59,130,246,.18);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'IRANYekanX',Tahoma,Verdana,sans-serif;background:radial-gradient(1000px 480px at 90% -10%,#1e3a5f 0%,var(--bg) 55%);color:var(--txt);min-height:100vh}
+.top{background:#060b14;color:#e8eefc;padding:12px 16px;font-size:13px;border-bottom:1px solid var(--line)}
+.top b{font-weight:500}
+.wrap{max-width:720px;margin:0 auto;padding:18px 14px 40px}
+.hero{margin:14px 0 18px}
+.hero h1{margin:0;font-size:22px;font-weight:500;line-height:1.6}
+.hero p{display:none}
+/* author display:* must not override HTML hidden after login */
+[hidden]{display:none!important}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 10px 28px #0005}
+.welcome{border-color:#1e3a5f;background:linear-gradient(180deg,#152238,#121a2b)}
+.welcome h2{margin:0 0 8px;font-size:17px;font-weight:500;color:#bfdbfe;line-height:1.6}
+.welcome p{margin:0;color:var(--mut);font-size:13px;line-height:1.8}
+label{display:block;font-size:12px;color:var(--mut);margin-bottom:6px}
+input{width:100%;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--inp);color:var(--txt);font-size:15px;font-family:inherit;margin-bottom:10px}
+input:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px var(--glow)}
+input::placeholder{color:#64748b}
+.btn{background:linear-gradient(180deg,#60a5fa,#2563eb);color:#fff;border:0;border-radius:10px;padding:12px 16px;font-size:15px;cursor:pointer;width:100%;font-family:inherit}
+.btn:disabled{opacity:.5;cursor:default}
+.ghost{background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px;cursor:pointer;width:100%;margin-top:8px;font-family:inherit}
+.ghost:hover{background:var(--soft);border-color:#334155}
+.plan{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:12px;border:1px solid var(--line);border-radius:12px;margin:8px 0;cursor:pointer;background:var(--inp)}
+.plan>div:last-child{white-space:nowrap}
+.plan-desc{white-space:pre-line;font-size:12px;color:var(--mut,#888);margin-top:3px;font-weight:400}
+.fair-badge{display:inline-block;background:#16a34a;color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-inline-start:6px;vertical-align:middle;white-space:nowrap}
+.promo-badge{display:inline-block;background:linear-gradient(135deg,#f59e0b,#ea580c);color:#1c1917;font-size:11px;font-weight:800;padding:2px 8px;border-radius:999px;margin-inline-start:6px;vertical-align:middle;white-space:nowrap}
+.plan.promo{border-color:#f59e0b!important;background:linear-gradient(135deg,rgba(245,158,11,.25),var(--inp))!important;box-shadow:0 0 0 1px rgba(245,158,11,.4)}
+.plan:hover{border-color:var(--acc);background:var(--soft)}
+.amt{font-size:26px;font-weight:500;margin:8px 0}
+.mut{color:var(--mut);font-size:12px}
+.ok{color:var(--ok)}.hi{color:var(--hi)}
+.flash{padding:10px;border-radius:10px;margin-bottom:12px;display:none}
+.flash.on{display:block}.flash.ok{background:#052e1c;color:#6ee7b7;border:1px solid #065f46}.flash.err{background:#3f1219;color:#fecdd3;border:1px solid #7f1d1d}
+.sub{color:var(--mut);font-size:13px;margin:0 0 14px;line-height:1.7}
+.contact{margin-top:16px;padding-top:12px;border-top:1px solid var(--line);font-size:12px;color:var(--mut);line-height:1.8}
+.contact a{color:#93c5fd;text-decoration:none}
+.contact.hidden{display:none}
+.foot{margin-top:20px;text-align:center;font-size:11px;color:#64748b}
+.pay-box{display:grid;gap:12px}
+.pay-amt-box{background:var(--soft);border:1px solid #1e3a5f;border-radius:12px;padding:14px 14px 12px;text-align:center}
+.pay-amt-box .lbl{font-size:12px;color:var(--mut);margin-bottom:4px}
+.pay-amt-box .amt{margin:0;color:#bfdbfe;letter-spacing:.3px;font-size:28px;cursor:pointer;user-select:all}
+.pay-amt-box .amt:hover{color:#fff}
+.pay-amt-box .rial{margin-top:4px;font-size:12px;color:#94a3b8;cursor:pointer}
+.pay-amt-box .rial:hover{color:#cbd5e1}
+.pay-amt-box .copy-hint,.pay-card-box .copy-hint{margin-top:8px;font-size:11px;color:#60a5fa;cursor:pointer;user-select:none}
+.pay-amt-box .copy-hint:hover,.pay-card-box .copy-hint:hover{color:#93c5fd;text-decoration:underline}
+.pay-card-box{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;background:var(--inp)}
+.pay-card-box .lbl{font-size:12px;color:var(--mut);margin-bottom:6px}
+.pay-card-box .num{font-size:18px;font-weight:500;letter-spacing:1px;direction:ltr;unicode-bidi:plaintext;text-align:center;color:#e2e8f0;font-variant-numeric:tabular-nums;cursor:pointer;user-select:all}
+.pay-card-box .num:hover{color:#fff}
+.pay-card-box .name{margin-top:6px;font-size:12px;color:var(--mut);text-align:center}
+.pay-meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--mut);padding:0 2px}
+.pay-meta .timer{color:#fbbf24;background:#2a1f0a;border:1px solid #78350f;border-radius:999px;padding:3px 10px}
+.pay-actions{display:grid;gap:8px;margin-top:4px}
+.pay-actions .btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pay-actions .btn-main{background:linear-gradient(180deg,#60a5fa,#2563eb);color:#fff;border:0;border-radius:10px;padding:12px;font-size:14px;cursor:pointer;font-family:inherit}
+.pay-actions .btn-main:hover{filter:brightness(1.08)}
+.pay-actions .btn-sec{background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:11px;font-size:14px;cursor:pointer;font-family:inherit}
+.pay-actions .btn-sec:hover{background:var(--soft);border-color:#334155}
+.pay-actions .btn-mute{background:transparent;border:0;color:var(--mut);padding:8px;font-size:13px;cursor:pointer;font-family:inherit}
+.pay-actions .btn-mute:hover{color:var(--txt)}
+.pay-qr-box{text-align:center;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}
+.pay-qr-box .lbl{font-size:12px;color:var(--mut);margin-bottom:10px}
+.pay-qr-box #pay-qr{display:inline-block;padding:10px;background:#fff;border-radius:10px;line-height:0}
+.pay-qr-box #pay-qr img,.pay-qr-box #pay-qr canvas{display:block}
+.pay-qr-box .hint{margin-top:8px;font-size:11px;color:var(--mut)}
+.sub-modal{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:rgba(3,8,18,.72);backdrop-filter:blur(4px)}
+.sub-modal[hidden]{display:none!important}
+.sub-modal-card{width:min(440px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px 16px 12px 12px;padding:18px 16px 16px;box-shadow:0 20px 50px #0008;max-height:92vh;overflow:auto}
+.sub-modal-card h2{margin:0 0 6px;font-size:18px;font-weight:500;color:#bfdbfe}
+.sub-modal-card .lead{margin:0 0 14px;font-size:13px;color:var(--mut);line-height:1.7}
+.sub-modal-qr{display:flex;justify-content:center;margin:8px 0 12px}
+.sub-modal-qr #sub-qr{display:inline-flex;align-items:center;justify-content:center;min-width:200px;min-height:200px;padding:12px;background:#fff;border-radius:12px;line-height:0}
+.sub-modal-qr #sub-qr img,.sub-modal-qr #sub-qr canvas,.sub-modal-qr #sub-qr table{display:block;max-width:100%;height:auto}
+.sub-modal-qr .qr-fallback{font-size:12px;color:#64748b;text-align:center;padding:8px}
+.sub-modal-url{width:100%;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--inp);color:var(--txt);font-size:12px;font-family:ui-monospace,Consolas,monospace;direction:ltr;unicode-bidi:plaintext;text-align:left;margin-bottom:10px;word-break:break-all}
+.sub-modal-actions{display:grid;gap:8px}
+.sub-modal-actions .btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (min-width:560px){
+  .sub-modal{align-items:center}
+  .sub-modal-card{border-radius:16px}
+}
+color-scheme:dark;
+</style>
+</head>
+<body>
+<div class="top" id="top-bar">سامانه جامع فروش تجهیزات لپ تاپ</div>
+<div class="wrap">
+  <div class="hero" id="shop-hero">
+    <h1 id="hero-title">سامانه جامع فروش تجهیزات لپ تاپ</h1>
+  </div>
+
+  <div class="flash" id="flash"></div>
+
+  <div class="card" id="step-search">
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="ghost" id="tab-login" type="button" style="margin:0;flex:1;border-color:var(--acc)">ورود</button>
+      <button class="ghost" id="tab-signup" type="button" style="margin:0;flex:1">خرید اکانت جدید</button>
+    </div>
+    <div id="box-login">
+      <h2 style="margin:0 0 8px;font-size:16px;font-weight:500">ورود</h2>
+      <p class="sub" id="slogan" hidden>سامانه جامع فروش تجهیزات لپ تاپ</p>
+      <label>نام کاربری</label>
+      <input id="uname" autocomplete="username" placeholder="نام کاربری">
+      <label>رمز عبور</label>
+      <input id="upass" type="password" autocomplete="current-password" placeholder="رمز عبور">
+      <button class="btn" id="btn-search" type="button">ورود</button>
+    </div>
+    <div id="box-signup" hidden>
+      <h2 style="margin:0 0 8px;font-size:16px;font-weight:500">ثبت‌نام و خرید</h2>
+      <p class="sub">موبایل و نام انگلیسی را بزنید؛ نام کاربری خودکار ساخته و تا مهلت پرداخت رزرو می‌شود.</p>
+      <label>موبایل</label>
+      <input id="su-mobile" inputmode="tel" autocomplete="tel" placeholder="09121234567">
+      <label>نام (فقط انگلیسی)</label>
+      <input id="su-name" autocomplete="nickname" placeholder="peyman" pattern="[A-Za-z]+">
+      <div class="mut" id="su-preview" style="margin:4px 0 10px">نام کاربری پیشنهادی بعد از انتخاب پلن مشخص می‌شود.</div>
+      <div id="su-plans" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div id="step-user" hidden>
+    <div class="card welcome" id="welcome-box">
+      <h2 id="welcome-title">به سامانه فروش خوش آمدید</h2>
+      <p id="welcome-body">جهت خرید پلن مورد نظر را انتخاب کنید و در مرحله بعد مبلغ نمایش‌داده‌شده را عیناً واریز کنید.</p>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:start">
+        <div>
+          <b id="u-name">—</b>
+          <div class="mut" id="u-meta"></div>
+        </div>
+        <button class="ghost" id="btn-back" type="button" style="width:auto;margin:0;padding:8px 10px">خروج</button>
+      </div>
+      <div class="mut" style="margin-top:10px" id="u-stats"></div>
+    </div>
+    <div class="card" id="plans-box">
+      <h2 style="margin:0 0 8px;font-size:16px;font-weight:500">بسته‌های ویژه حساب</h2>
+      <div id="plans"></div>
+    </div>
+  </div>
+
+  <div id="step-pay" hidden>
+    <div class="card pay-box">
+      <div class="pay-amt-box">
+        <div class="lbl">مبلغ قابل پرداخت</div>
+        <div class="amt" id="pay-amt" title="کلیک برای کپی ریال">—</div>
+        <div class="rial" id="pay-rial" title="کلیک برای کپی ریال"></div>
+        <div class="copy-hint" id="btn-copy-rial">کپی مبلغ (ریال)</div>
+      </div>
+      <div class="pay-card-box">
+        <div class="lbl">واریز به کارت</div>
+        <div class="num" id="pay-card" title="کلیک برای کپی">—</div>
+        <div class="name" id="pay-card-name"></div>
+        <div class="copy-hint" id="btn-copy-card">کپی شماره کارت</div>
+      </div>
+      <div class="pay-qr-box" id="pay-qr-wrap" hidden>
+        <div class="lbl">اسکن شماره کارت</div>
+        <div id="pay-qr"></div>
+        <div class="hint">با اپ بانک اسکن کنید یا شماره را کپی کنید</div>
+      </div>
+      <div class="pay-meta">
+        <span id="pay-plan"></span>
+        <span class="timer" id="pay-timer"></span>
+      </div>
+      <div class="pay-actions">
+        <button class="btn-main" id="btn-refresh" type="button">بررسی پرداخت</button>
+        <button class="btn-mute" id="btn-cancel-flow" type="button">بازگشت</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="contact hidden" id="contact"></div>
+  <div class="foot">© سامانه جامع فروش تجهیزات لپ تاپ</div>
+</div>
+
+<div class="sub-modal" id="sub-modal" hidden>
+  <div class="sub-modal-card" role="dialog" aria-modal="true" aria-labelledby="sub-modal-title">
+    <h2 id="sub-modal-title">اکانت آماده است</h2>
+    <p class="lead" id="sub-modal-lead">لینک سابسکریپشن را اسکن یا کپی کنید و بلافاصله وصل شوید.</p>
+    <div class="sub-modal-qr"><div id="sub-qr"></div></div>
+    <input class="sub-modal-url" id="sub-url" readonly dir="ltr">
+    <div class="sub-modal-actions">
+      <button class="btn" id="btn-copy-sub" type="button">کپی لینک سابسکریپشن</button>
+      <div class="btn-row">
+        <button class="ghost" id="btn-open-sub" type="button" style="margin:0">باز کردن لینک</button>
+        <button class="ghost" id="btn-close-sub" type="button" style="margin:0">بستن</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="static/qrcode.min.js"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let state = {user:null, order:null, timer:null, poll:null, brand:null, qr:null, subQr:null, catalog:null, mode:'login', subShownFor:null};
+function flash(msg, kind){
+  const el=$('flash');
+  if (!msg){ el.className='flash'; el.textContent=''; return; }
+  el.className='flash on '+(kind||'ok');
+  el.textContent=msg;
+}
+function esc(s){ return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function digitsOnly(s){ return String(s||'').replace(/\D/g,''); }
+function formatCard(num){
+  const d = digitsOnly(num);
+  if (!d) return '—';
+  return d.replace(/(\d{4})(?=\d)/g, '$1-');
+}
+function tomanToRial(toman){
+  const n = Number(toman);
+  if (!Number.isFinite(n)) return '';
+  return String(Math.round(n * 10));
+}
+async function copyText(text, okMsg){
+  const t = String(text||'');
+  if (!t){ flash('چیزی برای کپی نیست.','err'); return; }
+  try {
+    await navigator.clipboard.writeText(t);
+    flash(okMsg || 'کپی شد.','ok');
+  } catch(e){
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = t; ta.style.position='fixed'; ta.style.left='-9999px';
+      document.body.appendChild(ta); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      flash(okMsg || 'کپی شد.','ok');
+    } catch(e2){ flash('کپی نشد.','err'); }
+  }
+}
+function renderCardQr(cardDigits){
+  const wrap = $('pay-qr-wrap');
+  const box = $('pay-qr');
+  if (!wrap || !box) return;
+  box.innerHTML = '';
+  state.qr = null;
+  const d = digitsOnly(cardDigits);
+  if (!d || typeof QRCode === 'undefined'){
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  try {
+    state.qr = new QRCode(box, {
+      text: d,
+      width: 148,
+      height: 148,
+      colorDark: '#0b1220',
+      colorLight: '#ffffff',
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  } catch(e){
+    wrap.hidden = true;
+  }
+}
+function closeSubModal(){
+  const m = $('sub-modal');
+  if (m) m.hidden = true;
+}
+function paintSubQr(url){
+  const box = $('sub-qr');
+  if (!box) return;
+  box.innerHTML = '';
+  state.subQr = null;
+  const draw = () => {
+    if (typeof QRCode === 'undefined'){
+      box.innerHTML = '<div class="qr-fallback">کتابخانه QR لود نشد — لینک را کپی کنید.</div>';
+      return;
+    }
+    try {
+      state.subQr = new QRCode(box, {
+        text: url,
+        width: 200,
+        height: 200,
+        colorDark: '#0b1220',
+        colorLight: '#ffffff',
+        correctLevel: QRCode.CorrectLevel.L
+      });
+    } catch (e1) {
+      try {
+        state.subQr = new QRCode(box, {
+          text: url,
+          width: 220,
+          height: 220,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.L
+        });
+      } catch (e2) {
+        box.innerHTML = '<div class="qr-fallback">ساخت QR ناموفق بود — لینک را کپی کنید.</div>';
+        return;
+      }
+    }
+    // iOS: canvas drawn in a previously-hidden node can stay blank — force visible redraw.
+    const canvas = box.querySelector('canvas');
+    const img = box.querySelector('img');
+    if (canvas && (!img || !img.getAttribute('src'))) {
+      try {
+        const data = canvas.toDataURL('image/png');
+        if (data && data.length > 100) {
+          const out = document.createElement('img');
+          out.alt = 'QR';
+          out.width = canvas.width;
+          out.height = canvas.height;
+          out.src = data;
+          box.innerHTML = '';
+          box.appendChild(out);
+        }
+      } catch (e3) {}
+    }
+    if (!box.querySelector('canvas,img,table,svg')) {
+      box.innerHTML = '<div class="qr-fallback">QR خالی ماند — لینک را کپی کنید.</div>';
+    }
+  };
+  // Show modal first, then paint on next frames (Safari/iOS blank-canvas fix).
+  requestAnimationFrame(() => setTimeout(draw, 40));
+}
+function showSubModal(o){
+  const url = String((o && o.subscription_url) || '').trim();
+  const uname = (o && o.username) || (state.user && state.user.username) || '';
+  const modal = $('sub-modal');
+  const box = $('sub-qr');
+  if (!modal || !box) return;
+  if (!url){
+    flash(uname
+      ? ('پرداخت تأیید شد. اکانت «' + uname + '» ساخته شد — لینک ساب فعلاً در دسترس نیست.')
+      : 'پرداخت تأیید شد.','ok');
+    return;
+  }
+  $('sub-modal-lead').textContent = uname
+    ? ('اکانت «' + uname + '» آماده‌ است. QR یا لینک زیر را در اپ کلاینت وارد کنید.')
+    : 'QR یا لینک زیر را در اپ کلاینت وارد کنید.';
+  $('sub-url').value = url;
+  box.innerHTML = '<div class="qr-fallback">در حال ساخت QR…</div>';
+  modal.hidden = false;
+  paintSubQr(url);
+  flash(uname
+    ? ('پرداخت تأیید شد. اکانت «' + uname + '» ساخته شد.')
+    : 'پرداخت تأیید شد.','ok');
+}
+function applyContact(u){
+  const bits = [];
+  if (u && u.telegram_channel){
+    const ch = u.telegram_channel;
+    const href = ch.startsWith('http') ? ch : ('https://t.me/' + ch.replace(/^@/,''));
+    bits.push('کانال: <a href="'+esc(href)+'" target="_blank" rel="noopener">'+esc(ch)+'</a>');
+  }
+  if (u && u.support_phone) bits.push('پشتیبانی: <a href="tel:'+esc(u.support_phone)+'">'+esc(u.support_phone)+'</a>');
+  if (u && u.support_telegram){
+    const tg = u.support_telegram;
+    const href = tg.startsWith('http') ? tg : ('https://t.me/' + tg.replace(/^@/,''));
+    bits.push('تلگرام: <a href="'+esc(href)+'" target="_blank" rel="noopener">'+esc(tg)+'</a>');
+  }
+  const box = $('contact');
+  if (bits.length){ box.innerHTML = bits.join('<br>'); box.classList.remove('hidden'); }
+  else { box.innerHTML=''; box.classList.add('hidden'); }
+}
+function applyPublicBrand(b){
+  if (!b) return;
+  state.brand = b;
+  const fixed = 'سامانه جامع فروش تجهیزات لپ تاپ';
+  $('top-bar').textContent = fixed;
+  $('hero-title').textContent = fixed;
+  document.title = fixed;
+  const meta = document.querySelector('meta[name="description"]');
+  if (meta) meta.setAttribute('content', fixed);
+  if (b.welcome_title) $('welcome-title').textContent = b.welcome_title;
+  if (b.welcome_body) $('welcome-body').textContent = b.welcome_body;
+  applyContact({
+    support_phone: b.support_phone,
+    support_telegram: b.support_telegram,
+  });
+}
+function applyWelcome(u){
+  const title = (u && u.welcome_title) || (state.brand && state.brand.welcome_title) || '';
+  const body = (u && u.welcome_body) || (state.brand && state.brand.welcome_body) || '';
+  if (title) $('welcome-title').textContent = title;
+  if (body) $('welcome-body').textContent = body;
+}
+async function api(path, body){
+  const opt = body !== undefined ? {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  const data = await r.json().catch(() => ({error:'جواب نامعتبر'}));
+  if (!r.ok) throw new Error(data.error || ('خطا '+r.status));
+  return data;
+}
+function show(step){
+  const logged = step === 'user' || step === 'pay';
+  $('top-bar').hidden = logged;
+  if ($('shop-hero')) $('shop-hero').hidden = logged;
+  $('step-search').hidden = step !== 'search';
+  $('step-user').hidden = step !== 'user' && step !== 'pay';
+  $('step-pay').hidden = step !== 'pay';
+  $('welcome-box').hidden = step !== 'user';
+  if (step !== 'user') $('plans-box').hidden = step === 'pay';
+  else $('plans-box').hidden = false;
+}
+function renderUser(u){
+  state.user = u;
+  applyWelcome(u);
+  applyContact(u);
+  $('u-name').textContent = u.username;
+  $('u-meta').textContent = 'وضعیت حساب: ' + (u.status||'—');
+  $('u-stats').innerHTML = 'سقف: <b>'+esc(u.limit_h)+'</b> | مصرف: <b>'+esc(u.used_h)+'</b>';
+  const box = $('plans');
+  if (!u.plans || !u.plans.length){
+    box.innerHTML = '<div class="mut">بسته‌ای تعریف نشده است.</div>';
+  } else {
+    box.innerHTML = u.plans.map(p =>
+      `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h|| (p.gib+' گیگ'))} | ${p.days} روز | ${esc(p.users_h || ((p.user_count||1)+' کاربره'))}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
+    ).join('');
+    box.querySelectorAll('.plan').forEach(el => {
+      el.onclick = () => createOrder(Number(el.dataset.id));
+    });
+  }
+  if (u.pending && u.pending.status === 'pending'){
+    showPay(u.pending, u);
+  } else {
+    show('user');
+  }
+}
+function showPay(order, user){
+  state.order = order;
+  const cardRaw = (user && user.card_number) ? user.card_number : (order.card_number || '');
+  state.order._card_digits = digitsOnly(cardRaw);
+  $('pay-amt').textContent = order.pay_h;
+  $('pay-rial').textContent = order.pay_rial_h || '';
+  $('pay-card').textContent = formatCard(cardRaw);
+  $('pay-card-name').textContent = (user && user.card_name) || order.card_name || '';
+  const vol = (Number(order.gib)||0) <= 0 ? 'نامحدود' : (order.gib + ' گیگ');
+  const usersN = Number(order.user_count || (state.user && state.user.plans && state.user.plans.find(x => x.id===order.plan_id) && state.user.plans.find(x => x.id===order.plan_id).user_count) || 1);
+  const usersTxt = (usersN > 0 ? (usersN + ' کاربره') : '');
+  $('pay-plan').textContent = vol + ' / ' + order.days + ' روز' + (usersTxt ? (' | ' + usersTxt) : '') + ' | سفارش #' + order.id;
+  renderCardQr(state.order._card_digits);
+  tickTimer();
+  if (state.timer) clearInterval(state.timer);
+  state.timer = setInterval(tickTimer, 1000);
+  if (state.poll) clearInterval(state.poll);
+  state.poll = setInterval(() => {
+    if (!state.order || state.order.status === 'paid') return;
+    refreshOrder({quiet:true}).catch(() => {});
+  }, 8000);
+  show('pay');
+  $('plans-box').hidden = true;
+}
+function tickTimer(){
+  if (!state.order) return;
+  const left = Math.max(0, Math.floor(state.order.expires_ts - Date.now()/1000));
+  state.order.expires_in = left;
+  const m = Math.floor(left/60), s = left%60;
+  $('pay-timer').textContent = left ? ('مهلت: ' + m + ':' + String(s).padStart(2,'0')) : 'مهلت تمام شد';
+  if (!left && state.timer){ clearInterval(state.timer); state.timer=null; }
+}
+function setMode(mode){
+  state.mode = mode;
+  $('box-login').hidden = mode !== 'login';
+  $('box-signup').hidden = mode !== 'signup';
+  $('tab-login').style.borderColor = mode==='login' ? 'var(--acc)' : 'var(--line)';
+  $('tab-signup').style.borderColor = mode==='signup' ? 'var(--acc)' : 'var(--line)';
+  flash('');
+  if (mode === 'signup') loadCatalog();
+}
+function updateSignupPreview(){
+  const name = ($('su-name').value||'').toLowerCase().replace(/[^a-z]/g,'');
+  const mob = ($('su-mobile').value||'').replace(/\D/g,'');
+  const dig = mob.length >= 3 ? mob.slice(-3) : '???';
+  $('su-preview').textContent = name.length >= 3
+    ? ('نام کاربری پیشنهادی: ' + name.slice(0,12) + dig + ' (در صورت تکراری، رقم تصادفی)')
+    : 'نام کاربری پیشنهادی بعد از وارد کردن نام مشخص می‌شود.';
+}
+async function loadCatalog(){
+  try {
+    const d = await api('api/catalog');
+    state.catalog = d;
+    const box = $('su-plans');
+    if (!d.has_card){
+      box.innerHTML = '<div class="mut">فروش اکانت جدید فعلاً فعال نیست (کارت فروشنده ثبت نشده).</div>';
+      return;
+    }
+    if (!d.plans || !d.plans.length){
+      box.innerHTML = '<div class="mut">پلنی برای فروش تعریف نشده.</div>';
+      return;
+    }
+    box.innerHTML = d.plans.map(p =>
+      `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h)} | ${p.days} روز | ${esc(p.users_h)}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
+    ).join('');
+    box.querySelectorAll('.plan').forEach(el => {
+      el.onclick = () => signupBuy(Number(el.dataset.id));
+    });
+  } catch(e){ flash(e.message,'err'); }
+}
+async function signupBuy(planId){
+  flash('');
+  const mobile = $('su-mobile').value.trim();
+  const name = $('su-name').value.trim();
+  if (!mobile){ flash('موبایل را وارد کنید.','err'); return; }
+  if (!name){ flash('نام انگلیسی را وارد کنید.','err'); return; }
+  try {
+    const d = await api('api/signup', {mobile, name, plan_id: planId});
+    const ord = d.order;
+    state.user = {
+      username: d.username,
+      status: 'رزرو / در انتظار پرداخت',
+      limit_h: '—',
+      used_h: '—',
+      card_number: ord.card_number,
+      card_name: ord.card_name,
+      plans: (state.catalog && state.catalog.plans) || [],
+      is_signup: true,
+    };
+    $('u-name').textContent = d.username;
+    $('u-meta').textContent = 'موبایل: ' + (d.mobile||'—') + ' | نام: ' + (d.display_name||'—');
+    $('u-stats').innerHTML = 'اکانت بعد از تأیید پرداخت در پنل ساخته می‌شود.';
+    showPay(ord, state.user);
+    flash(d.message || 'رزرو شد.','ok');
+  } catch(e){ flash(e.message,'err'); }
+}
+async function search(){
+  flash('');
+  const uname = $('uname').value.trim();
+  if (!uname){ flash('نام کاربری را وارد کنید.','err'); return; }
+  if (!$('upass').value){ flash('رمز عبور را وارد کنید.','err'); return; }
+  $('btn-search').disabled = true;
+  try {
+    const d = await api('api/lookup?username=' + encodeURIComponent(uname));
+    renderUser(d);
+  } catch(e){ flash(e.message,'err'); }
+  finally { $('btn-search').disabled = false; }
+}
+async function createOrder(planId){
+  flash('');
+  try {
+    const d = await api('api/order', {username: state.user.username, plan_id: planId});
+    const ord = d.order;
+    ord.card_number = ord.card_number || state.user.card_number;
+    ord.card_name = ord.card_name || state.user.card_name;
+    state.user.card_number = ord.card_number;
+    state.user.card_name = ord.card_name;
+    showPay(ord, state.user);
+    flash(d.message || 'سفارش ثبت شد.','ok');
+  } catch(e){ flash(e.message,'err'); }
+}
+async function refreshOrder(opts){
+  if (!state.order) return;
+  const quiet = !!(opts && opts.quiet);
+  try {
+    const d = await api('api/order?id=' + state.order.id);
+    const o = d.order;
+    if (o.status === 'paid'){
+      if (state.timer){ clearInterval(state.timer); state.timer=null; }
+      if (state.poll){ clearInterval(state.poll); state.poll=null; }
+      $('pay-timer').innerHTML = '<span class="ok">تأیید شد</span>';
+      state.order = o;
+      const key = String(o.id || '') + ':' + String(o.subscription_url || '');
+      if (state.subShownFor !== key){
+        state.subShownFor = key;
+        showSubModal(o);
+      }
+      return;
+    }
+    if (o.status !== 'pending'){
+      if (!quiet) flash('سفارش فعال نیست.','err');
+      return;
+    }
+    state.order = o;
+    tickTimer();
+    if (!quiet) flash('هنوز پرداختی دیده نشده.','ok');
+  } catch(e){ if (!quiet) flash(e.message,'err'); }
+}
+$('tab-login').onclick = () => setMode('login');
+$('tab-signup').onclick = () => setMode('signup');
+$('su-name').addEventListener('input', updateSignupPreview);
+$('su-mobile').addEventListener('input', updateSignupPreview);
+$('btn-search').onclick = search;
+$('uname').addEventListener('keydown', e => { if (e.key==='Enter') $('upass').focus(); });
+$('upass').addEventListener('keydown', e => { if (e.key==='Enter') search(); });
+$('btn-back').onclick = () => {
+  state.user=null; state.order=null;
+  if (state.timer){ clearInterval(state.timer); state.timer=null; }
+  if (state.poll){ clearInterval(state.poll); state.poll=null; }
+  closeSubModal();
+  $('upass').value='';
+  applyPublicBrand(state.brand);
+  show('search'); flash('');
+};
+$('btn-cancel-flow').onclick = () => {
+  if (state.poll){ clearInterval(state.poll); state.poll=null; }
+  if (state.user){ show('user'); $('plans-box').hidden=false; flash(''); }
+  else show('search');
+};
+$('btn-refresh').onclick = refreshOrder;
+function copyRial(){
+  if (!state.order) return;
+  copyText(tomanToRial(state.order.pay_amount), 'مبلغ ریال کپی شد.');
+}
+function copyCard(){
+  if (!state.order) return;
+  const dig = state.order._card_digits || digitsOnly(state.order.card_number || (state.user && state.user.card_number) || '');
+  copyText(dig, 'شماره کارت کپی شد.');
+}
+$('btn-copy-rial').onclick = copyRial;
+$('pay-amt').onclick = copyRial;
+$('pay-rial').onclick = copyRial;
+$('btn-copy-card').onclick = copyCard;
+$('pay-card').onclick = copyCard;
+$('btn-copy-sub').onclick = () => copyText($('sub-url').value, 'لینک ساب کپی شد.');
+$('btn-open-sub').onclick = () => {
+  const u = ($('sub-url').value || '').trim();
+  if (u) window.open(u, '_blank', 'noopener');
+};
+$('btn-close-sub').onclick = closeSubModal;
+$('sub-modal').addEventListener('click', (e) => {
+  if (e.target === $('sub-modal')) closeSubModal();
+});
+const q = new URLSearchParams(location.search);
+if (q.get('u')){ $('uname').value = q.get('u'); }
+api('api/brand').then(applyPublicBrand).catch(() => {});
+</script>
+</body>
+</html>

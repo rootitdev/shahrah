@@ -1,0 +1,105 @@
+{
+  "_comment": "Merge these into NL Xray inbounds (or enable via shahrah). Vision+XHTTP already match live Webdade state. Trojan/SS need certs + ufw.",
+  "inbounds": [
+    {
+      "tag": "in-main",
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "email": "webdade-test",
+            "flow": "xtls-rprx-vision"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "www.cloudflare.com:443",
+          "xver": 0,
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "REPLACE_WITH_/etc/shahrah/state.json_private_key",
+          "shortIds": ["45a83332119989cd"]
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    },
+    {
+      "tag": "in-53",
+      "listen": "0.0.0.0",
+      "port": 53,
+      "protocol": "vless",
+      "settings": {
+        "clients": [
+          {
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "email": "webdade-test"
+          }
+        ],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "show": false,
+          "dest": "www.cloudflare.com:443",
+          "serverNames": ["www.cloudflare.com"],
+          "privateKey": "REPLACE_WITH_/etc/shahrah/state.json_private_key",
+          "shortIds": ["45a83332119989cd"]
+        },
+        "xhttpSettings": { "path": "/shahrah", "mode": "stream-one" }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"],
+        "routeOnly": true
+      }
+    },
+    {
+      "tag": "in-trojan-8444",
+      "listen": "0.0.0.0",
+      "port": 8444,
+      "protocol": "trojan",
+      "settings": {
+        "clients": [
+          { "password": "nlkaWQ9rGYYY7tMdpJeyja28", "email": "webdade-test" }
+        ]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/etc/shahrah/certs/trojan-fullchain.pem",
+              "keyFile": "/etc/shahrah/certs/trojan-privkey.pem"
+            }
+          ],
+          "alpn": ["h2", "http/1.1"]
+        }
+      }
+    },
+    {
+      "tag": "in-ss2022",
+      "listen": "0.0.0.0",
+      "port": 40000,
+      "protocol": "shadowsocks",
+      "settings": {
+        "method": "2022-blake3-aes-128-gcm",
+        "password": "eDDnHjqwqkTFfnXSYKv5ig",
+        "network": "tcp,udp"
+      }
+    }
+  ]
+}

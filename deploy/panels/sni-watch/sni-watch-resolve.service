@@ -1,0 +1,11 @@
+[Unit]
+Description=Resolve sni-watch usernames to Xray email ids (Panel API)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/root/.vpn-secrets/.env
+Environment=SHAHRAH_PANEL_URL=https://panel.example.com
+ExecStart=/usr/bin/python3 /usr/local/lib/sni-watch/resolve_watchlist.py
+Nice=10

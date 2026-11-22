@@ -1,0 +1,13 @@
+[Unit]
+Description=Reverse tunnel path-web to DE master (autossh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/usr/bin/autossh -M 0 -N -i /root/.ssh/shahrah_tunnel_de -o BatchMode=yes -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -R 127.0.0.1:8791:127.0.0.1:8791 root@203.0.113.10
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

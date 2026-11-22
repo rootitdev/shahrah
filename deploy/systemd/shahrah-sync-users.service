@@ -1,0 +1,10 @@
+[Unit]
+Description=Sync PasarGuard users into local shahrah Xray
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=!/etc/shahrah/pg-node-active
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shahrah-sync-panel-users
+Nice=10

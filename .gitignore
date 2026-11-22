@@ -1,0 +1,28 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Never commit infrastructure facts or secrets.
+.env
+*.env
+secrets/
+*.pem
+*.key
+/config/*.local.*
+state.json
+*.state.json
+brain.json
+report.json
+
+# Local lab scratch (passwords, one-shot apply scripts).
+_lt/
+
+# Production dumps and operator backups (never publish).
+backups/
+*.sqlite3
+*.sqlite

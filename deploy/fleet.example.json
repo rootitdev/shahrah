@@ -1,0 +1,19 @@
+{
+  "note": "Copy to /etc/shahrah/fleet.json on the master. Each state_path is on the matching exit VPS.",
+  "exits": [
+    {
+      "slug": "nl",
+      "state_path": "/etc/shahrah/state.json",
+      "core_name": "shahrah-nl",
+      "host_prefix": "nl"
+    },
+    {
+      "slug": "nl-via-iran",
+      "state_path": "/etc/shahrah/state.json",
+      "core_name": "shahrah-nl",
+      "host_prefix": "nl",
+      "client_host": "IRAN_PUBLIC_IP",
+      "comment": "duplicate hosts with Iran entry address — use different host_prefix if both direct and relay subscriptions are needed"
+    }
+  ]
+}

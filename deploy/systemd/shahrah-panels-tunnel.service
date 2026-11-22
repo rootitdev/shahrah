@@ -1,0 +1,14 @@
+[Unit]
+Description=Reverse tunnel ig/watch panels to DE master (autossh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Environment=AUTOSSH_GATETIME=0
+# Prefer key auth: /root/.ssh/shahrah_tunnel_de (see docs/PRODUCTION-WEBDADE.md)
+ExecStart=/usr/bin/autossh -M 0 -N -i /root/.ssh/shahrah_tunnel_de -o BatchMode=yes -o IdentitiesOnly=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=accept-new -R 127.0.0.1:8786:127.0.0.1:8786 -R 127.0.0.1:8785:127.0.0.1:8785 root@203.0.113.10
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

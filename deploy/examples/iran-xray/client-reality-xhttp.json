@@ -1,0 +1,74 @@
+{
+  "log": { "loglevel": "warning" },
+  "dns": {
+    "servers": [
+      {
+        "address": "localhost",
+        "domains": ["geosite:category-ir", "geosite:private"],
+        "expectIPs": ["geoip:ir"]
+      },
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query"
+    ],
+    "queryStrategy": "UseIPv4",
+    "disableFallback": true
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "udp": true },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"] }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [{
+          "address": "203.0.113.20",
+          "port": 53,
+          "users": [{
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "encryption": "none"
+          }]
+        }]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.cloudflare.com",
+          "fingerprint": "chrome",
+          "publicKey": "-LsvFSSWY2t6LMyP23GAhk2I-64S3x6VakVCoVUQ9iM",
+          "shortId": "45a83332119989cd",
+          "spiderX": ""
+        },
+        "xhttpSettings": { "path": "/shahrah", "mode": "stream-one" }
+      }
+    },
+    { "tag": "DIRECT", "protocol": "freedom" },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "domain": ["geosite:category-ads-all", "geosite:malware", "geosite:phishing"],
+        "outboundTag": "BLOCK"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:category-ir", "geosite:private"],
+        "outboundTag": "DIRECT"
+      },
+      { "type": "field", "ip": ["geoip:ir", "geoip:private"], "outboundTag": "DIRECT" },
+      { "type": "field", "ip": ["::/0"], "outboundTag": "BLOCK" },
+      { "type": "field", "network": "tcp,udp", "outboundTag": "proxy" }
+    ]
+  }
+}

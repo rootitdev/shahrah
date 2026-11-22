@@ -1,0 +1,16 @@
+# PasarGuard Node — exit host (NL).
+# Only /var/lib/pg-node is required by upstream; we also bind shahrah/xray log
+# dirs so access.log is visible to sni-watch on the host.
+services:
+  node:
+    container_name: node
+    image: pasarguard/node:latest
+    restart: always
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+    env_file: .env
+    volumes:
+      - /var/lib/pg-node:/var/lib/pg-node
+      - /var/lib/shahrah:/var/lib/shahrah
+      - /var/log/xray:/var/log/xray

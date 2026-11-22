@@ -1,0 +1,19 @@
+[Unit]
+Description=Instagram multiplier web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/ig-mult-web/app.py
+Restart=always
+RestartSec=2
+User=root
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/root/.vpn-secrets/.env
+Environment=SHAHRAH_PANEL_URL=https://panel.example.com
+# Legacy DB/SSH lookup must stay unset — CLI uses Panel API only.
+UnsetEnvironment=PANEL_DB_SSH PANEL_DB_SSH_KEY PANEL_DB_PATH PANEL_DB_HOST
+
+[Install]
+WantedBy=multi-user.target

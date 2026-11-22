@@ -1,0 +1,54 @@
+{
+  "log": { "loglevel": "warning" },
+  "dns": {
+    "servers": [
+      {
+        "address": "localhost",
+        "domains": ["geosite:category-ir", "geosite:private"],
+        "expectIPs": ["geoip:ir"]
+      },
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query"
+    ],
+    "queryStrategy": "UseIPv4",
+    "disableFallback": true
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "udp": true }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy",
+      "protocol": "shadowsocks",
+      "settings": {
+        "servers": [{
+          "address": "203.0.113.11",
+          "port": 40000,
+          "method": "2022-blake3-aes-128-gcm",
+          "password": "eDDnHjqwqkTFfnXSYKv5ig"
+        }]
+      }
+    },
+    { "tag": "DIRECT", "protocol": "freedom" },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": [
+      {
+        "type": "field",
+        "domain": ["geosite:category-ir", "geosite:private"],
+        "outboundTag": "DIRECT"
+      },
+      { "type": "field", "ip": ["geoip:ir", "geoip:private"], "outboundTag": "DIRECT" },
+      { "type": "field", "ip": ["::/0"], "outboundTag": "BLOCK" },
+      { "type": "field", "network": "tcp,udp", "outboundTag": "proxy" }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+[Unit]
+Description=Shahrah host health alert (Telegram)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shahrah-host-alert.sh
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

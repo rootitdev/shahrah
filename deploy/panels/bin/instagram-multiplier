@@ -1,0 +1,521 @@
+#!/usr/bin/python3
+"""CLI: add/remove/list Instagram-multiplier users by panel username.
+
+Install: /usr/local/sbin/instagram-multiplier
+
+User lookup uses the PasarGuard **HTTP API** (``SHAHRAH_PANEL_URL`` +
+``SHAHRAH_PANEL_API_KEY`` / ``PANEL_API_KEY``). No docker exec and no SSH to
+the master DB — the CLI stays on the exit (where Xray tags are applied); the
+panel stays the system of record.
+"""
+from __future__ import annotations
+
+import fcntl
+import json
+import os
+import ssl
+import subprocess
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+
+class CliError(Exception):
+    def __init__(self, msg: str, code: int = 1) -> None:
+        super().__init__(msg)
+        self.code = code
+
+_HERE = Path(__file__).resolve().parent
+for _p in (
+    _HERE,
+    Path("/usr/local/lib/instagram-multiplier"),
+):
+    if (_p / "instagram_multiplier.py").is_file():
+        sys.path.insert(0, str(_p))
+        break
+else:
+    sys.path.insert(0, str(_HERE))
+from datetime import datetime, timedelta
+
+from instagram_multiplier import (  # noqa: E402
+    aggregate_ig_stats,
+    date_span,
+    format_bytes,
+    ig_extra_bytes,
+    load_settings,
+    parse_user_ids,
+    stats_coverage,
+    stats_date_span,
+    tag_for,
+    today_str,
+    update_rollup,
+)
+
+USERS_FILE = Path("/etc/vpn-monitor/instagram-multiplier-users.txt")
+PAUSED_FILE = Path("/etc/vpn-monitor/instagram-multiplier-paused.txt")
+STATS_LOG = Path("/var/log/vpn-path/stats.log")
+EXPORT = Path("/usr/local/sbin/iran_sync_export.py")
+LOCK_FILE = USERS_FILE.parent / ".instagram-multiplier-users.lock"
+PAUSED_LOCK = USERS_FILE.parent / ".instagram-multiplier-paused.lock"
+
+
+def fail(msg: str, code: int = 1) -> None:
+    raise CliError(msg, code)
+
+
+def usage() -> None:
+    fail(
+        "usage:\n"
+        "  instagram-multiplier add <username>\n"
+        "  instagram-multiplier remove <username>\n"
+        "  instagram-multiplier pause <username>\n"
+        "  instagram-multiplier resume <username>\n"
+        "  instagram-multiplier list\n"
+        "  instagram-multiplier stats [--date YYYY-MM-DD | --days N]",
+        2,
+    )
+
+
+def _panel_creds() -> tuple[str, str]:
+    base = (
+        os.environ.get("SHAHRAH_PANEL_URL")
+        or os.environ.get("PANEL_URL")
+        or ""
+    ).strip().rstrip("/")
+    key = (
+        os.environ.get("SHAHRAH_PANEL_API_KEY")
+        or os.environ.get("PANEL_API_KEY")
+        or ""
+    ).strip()
+    if not base or not key:
+        # Optional: secrets file on exit hosts
+        for path in (
+            Path("/root/.vpn-secrets/.env"),
+            Path("/etc/shahrah/ig-mult.env"),
+            Path("/etc/ig-mult-web/config.env"),
+        ):
+            if not path.is_file():
+                continue
+            for ln in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                s = ln.strip()
+                if not s or s.startswith("#") or "=" not in s:
+                    continue
+                k, v = s.split("=", 1)
+                k, v = k.strip(), v.strip().strip('"').strip("'")
+                if k in {"SHAHRAH_PANEL_URL", "PANEL_URL"} and not base:
+                    base = v.rstrip("/")
+                if k in {"SHAHRAH_PANEL_API_KEY", "PANEL_API_KEY"} and not key:
+                    key = v
+    if not base or not key:
+        fail(
+            "SHAHRAH_PANEL_URL و SHAHRAH_PANEL_API_KEY را در محیط یا "
+            "/root/.vpn-secrets/.env ست کنید (دیگر از docker/SSH به DB استفاده نمی‌شود)."
+        )
+    return base, key
+
+
+def _panel_get(path: str) -> dict | list:
+    base, key = _panel_creds()
+    url = f"{base}{path}"
+    req = urllib.request.Request(url, headers={"X-Api-Key": key}, method="GET")
+    ctx = ssl.create_default_context()
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        body = e.read().decode(errors="replace")[:300]
+        fail(f"پنل API خطا {e.code} برای {path}: {body}")
+    except Exception as e:  # noqa: BLE001 — surface as operator message
+        fail(f"پنل API در دسترس نیست ({base}): {e}")
+
+
+def lookup(username: str) -> dict:
+    name = username.strip()
+    if not name or name.startswith("-"):
+        fail("نام کاربری نامعتبر است.")
+    try:
+        u = _panel_get(f"/api/user/{urllib.parse.quote(name)}")
+    except CliError:
+        # case-insensitive scan of first pages
+        offset = 0
+        found: list[dict] = []
+        while offset < 2000:
+            page = _panel_get(f"/api/users?offset={offset}&limit=100")
+            users = page.get("users", page) if isinstance(page, dict) else page
+            if not isinstance(users, list) or not users:
+                break
+            for row in users:
+                if str(row.get("username", "")).lower() == name.lower():
+                    found.append(row)
+            if len(users) < 100:
+                break
+            offset += 100
+        if not found:
+            fail(f"کاربر «{name}» در پنل پیدا نشد.")
+        if len(found) > 1:
+            lines = [f"چند کاربر با نام «{name}» پیدا شد؛ دقیق‌تر مشخص کنید:"]
+            for r in found:
+                lines.append(f"  id={r['id']}  {r['username']}  status={r.get('status')}")
+            fail("\n".join(lines))
+        u = found[0]
+    if not isinstance(u, dict) or "id" not in u:
+        fail(f"پاسخ پنل برای «{name}» نامعتبر بود.")
+    return {
+        "id": int(u["id"]),
+        "username": str(u.get("username") or name),
+        "status": str(u.get("status") or ""),
+    }
+
+
+def names_by_id(ids: list[int]) -> dict[int, dict]:
+    if not ids:
+        return {}
+    want = {int(i) for i in ids}
+    out: dict[int, dict] = {}
+    offset = 0
+    while want - set(out) and offset < 5000:
+        page = _panel_get(f"/api/users?offset={offset}&limit=100")
+        users = page.get("users", page) if isinstance(page, dict) else page
+        if not isinstance(users, list) or not users:
+            break
+        for row in users:
+            try:
+                uid = int(row["id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if uid in want:
+                out[uid] = {
+                    "id": uid,
+                    "username": str(row.get("username") or ""),
+                    "status": str(row.get("status") or ""),
+                }
+        if len(users) < 100:
+            break
+        offset += 100
+    return out
+
+
+HEADER = (
+    "# Panel user ids that get Instagram billed at INSTAGRAM_MULTIPLIER.\n"
+    "# Everyone else is unchanged (no extra outbound/rule).\n"
+    "# One id per line. Comments allowed.\n"
+)
+
+
+def read_file() -> str:
+    if not USERS_FILE.exists():
+        return HEADER
+    return USERS_FILE.read_text()
+
+
+def write_file(text: str) -> None:
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = USERS_FILE.with_suffix(".txt.tmp")
+    tmp.write_text(text if text.endswith("\n") else text + "\n")
+    tmp.chmod(0o600)
+    tmp.replace(USERS_FILE)
+
+
+def entries_from_raw(raw: str) -> list[tuple[int, str]]:
+    """Keep only numeric ids; drop leftover prose that used to corrupt the file."""
+    seen: list[tuple[int, str]] = []
+    have: set[int] = set()
+    for ln in raw.splitlines():
+        s = ln.split("#", 1)
+        core = s[0].strip()
+        comment = s[1].strip() if len(s) > 1 else ""
+        tok = core.split()[0] if core else ""
+        if not tok.isdigit():
+            continue
+        uid = int(tok)
+        if uid in have:
+            continue
+        have.add(uid)
+        seen.append((uid, comment))
+    return seen
+
+
+def render_entries(entries: list[tuple[int, str]]) -> str:
+    lines = [HEADER.rstrip("\n")]
+    for uid, name in entries:
+        lines.append(f"{uid}  # {name}" if name else str(uid))
+    return "\n".join(lines) + "\n"
+
+
+def lock_users():
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(LOCK_FILE, "a+")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    return fh
+
+
+def current_ids(text: str | None = None) -> list[int]:
+    return parse_user_ids(text if text is not None else read_file())
+
+
+def add_id(uid: int, username: str) -> bool:
+    """Return True if the file changed. Always rewrites a clean id-only file."""
+    lock = lock_users()
+    try:
+        entries = entries_from_raw(read_file())
+        if uid in {e[0] for e in entries}:
+            write_file(render_entries(entries))
+            return False
+        entries.append((uid, username))
+        write_file(render_entries(entries))
+        return True
+    finally:
+        lock.close()
+
+
+def remove_id(uid: int) -> bool:
+    lock = lock_users()
+    try:
+        entries = entries_from_raw(read_file())
+        nxt = [e for e in entries if e[0] != uid]
+        if len(nxt) == len(entries):
+            write_file(render_entries(entries))
+            return False
+        write_file(render_entries(nxt))
+    finally:
+        lock.close()
+    try:
+        set_paused(uid, False)
+    except SystemExit:
+        pass
+    return True
+
+
+def read_paused() -> list[int]:
+    if not PAUSED_FILE.exists():
+        return []
+    return parse_user_ids(PAUSED_FILE.read_text())
+
+
+def write_paused(ids: list[int]) -> None:
+    PAUSED_FILE.parent.mkdir(parents=True, exist_ok=True)
+    lines = [
+        "# Temporarily paused multiplier membership (still listed; no CAT rule / no extra bill).",
+        "# One id per line.",
+    ]
+    for uid in ids:
+        lines.append(str(int(uid)))
+    tmp = PAUSED_FILE.with_suffix(".txt.tmp")
+    tmp.write_text("\n".join(lines) + "\n")
+    tmp.chmod(0o600)
+    tmp.replace(PAUSED_FILE)
+
+
+def set_paused(uid: int, paused: bool) -> bool:
+    """Return True if paused set changed."""
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(PAUSED_LOCK, "a+")
+    fcntl.flock(fh, fcntl.LOCK_EX)
+    try:
+        cur = read_paused()
+        have = set(cur)
+        if paused:
+            if uid in have:
+                return False
+            if uid not in set(current_ids()):
+                fail(f"id={uid} در لیست ضریب نیست؛ اول add کنید.")
+            cur.append(uid)
+            write_paused(cur)
+            return True
+        if uid not in have:
+            return False
+        write_paused([x for x in cur if x != uid])
+        return True
+    finally:
+        fh.close()
+
+
+def export_now() -> str:
+    print("در حال export به ایران…")
+    p = subprocess.run(
+        [sys.executable, str(EXPORT)],
+        capture_output=True,
+        text=True,
+        timeout=90,
+    )
+    out = (p.stdout or "").strip()
+    last = out.splitlines()[-1] if out else ""
+    if last:
+        print(last)
+    if p.returncode != 0:
+        err = (p.stderr or p.stdout or "").strip().splitlines()
+        tail = err[-1] if err else f"exit {p.returncode}"
+        fail(f"export ناموفق بود: {tail}")
+    return last
+
+
+def cmd_add(username: str) -> None:
+    u = lookup(username)
+    uid = int(u["id"])
+    if not add_id(uid, u["username"]):
+        print(f"«{u['username']}» از قبل در لیست است (id={uid}، {tag_for(uid)}).")
+        return
+    print(f"اضافه شد: {u['username']}  id={uid}  {tag_for(uid)}")
+    export_now()
+
+
+def cmd_remove(username: str) -> None:
+    u = lookup(username)
+    uid = int(u["id"])
+    if not remove_id(uid):
+        print(f"«{u['username']}» در لیست ضریب اینستاگرام نبود (id={uid}).")
+        return
+    print(f"حذف شد: {u['username']}  id={uid}")
+    export_now()
+
+
+def cmd_list() -> None:
+    ids = current_ids()
+    if not ids:
+        print("لیست خالی است.")
+        return
+    info = names_by_id(ids)
+    paused = set(read_paused())
+    print(f"{'id':<6} {'username':<24} {'status':<12} {'mult':<8} tag")
+    for uid in ids:
+        r = info.get(uid)
+        flag = "paused" if uid in paused else "on"
+        if r:
+            print(f"{uid:<6} {r['username']:<24} {r['status']:<12} {flag:<8} {tag_for(uid)}")
+        else:
+            print(f"{uid:<6} {'? (در پنل نیست)':<24} {'missing':<12} {flag:<8} {tag_for(uid)}")
+
+
+def cmd_pause(username: str, paused: bool) -> None:
+    if username.strip().isdigit():
+        uid = int(username.strip())
+        info = names_by_id([uid]).get(uid) or {"id": uid, "username": str(uid)}
+    else:
+        info = lookup(username)
+        uid = int(info["id"])
+    name = info.get("username") or str(uid)
+    if not set_paused(uid, paused):
+        print(f"«{name}» از قبل {'متوقف' if paused else 'فعال'} بود (id={uid}).")
+        return
+    print(f"{'متوقف شد' if paused else 'از سر گرفته شد'}: {name}  id={uid}")
+    export_now()
+
+
+def _parse_stats_args(args: list[str]) -> tuple[set[str], str]:
+    if len(args) == 1:
+        today = today_str()
+        return {today}, f"امروز ({today})"
+    if args[1] == "--date":
+        if len(args) != 3:
+            usage()
+        try:
+            datetime.strptime(args[2], "%Y-%m-%d")
+        except ValueError:
+            fail("تاریخ باید YYYY-MM-DD باشد.")
+        return {args[2]}, args[2]
+    if args[1] == "--days":
+        if len(args) != 3 or not args[2].isdigit() or int(args[2]) < 1:
+            usage()
+        n = int(args[2])
+        dates = stats_date_span(n)
+        label = f"{n} روز اخیر ({min(dates)} → {max(dates)})"
+        return dates, label
+    usage()
+    raise AssertionError
+
+
+def cmd_stats(args: list[str]) -> None:
+    dates, label = _parse_stats_args(args)
+    settings = load_settings()
+    ids = settings.user_ids
+    if not ids:
+        print("لیست کاربران ضریب خالی است.")
+        return
+    if not STATS_LOG.exists():
+        fail(f"لاگ آمار پیدا نشد: {STATS_LOG}")
+    agg = aggregate_ig_stats(STATS_LOG, ids, dates=dates)
+    info = names_by_id(ids)
+    mult = settings.multiplier
+    print(f"ضریب: {mult:g}×   بازه: {label}")
+    print(f"منبع: {STATS_LOG}")
+    print()
+    print(
+        f"{'id':<6} {'username':<22} {'ضریب‌شده':>12} {'اضافه ضریب':>14} "
+        f"{'کل شارژ':>12} {'کل واقعی':>12}"
+    )
+    tot_ig = tot_extra = tot_w = tot_raw = 0
+    active = 0
+    for uid in ids:
+        st = agg.get(uid)
+        ig = st.ig if st else 0
+        raw = st.raw if st else 0
+        weighted = st.weighted if st else 0
+        extra = max(0, weighted - raw) if st else ig_extra_bytes(ig, mult)
+        r = info.get(uid)
+        name = r["username"] if r else "? (در پنل نیست)"
+        if ig:
+            active += 1
+        tot_ig += ig
+        tot_extra += extra
+        tot_w += weighted
+        tot_raw += raw
+        print(
+            f"{uid:<6} {name:<22} {format_bytes(ig):>12} {format_bytes(extra):>14} "
+            f"{format_bytes(weighted):>12} {format_bytes(raw):>12}"
+        )
+    print("-" * 84)
+    print(
+        f"{'جمع':<6} {'':22} {format_bytes(tot_ig):>12} {format_bytes(tot_extra):>14} "
+        f"{format_bytes(tot_w):>12} {format_bytes(tot_raw):>12}"
+    )
+    idle = len(ids) - active
+    print()
+    print(
+        f"کاربران فعال: {active}/{len(ids)}"
+        + (f"  |  بدون ترافیک ضریب‌شده در این بازه: {idle}" if idle else "")
+    )
+    print("توضیح: «ضریب‌شده» = Instagram + pornhub/xnxx/xvideos. «اضافه ضریب» ≈ ضریب‌شده × (ضریب−۱).")
+
+
+def main() -> None:
+    try:
+        _main()
+    except CliError as e:
+        print(str(e), file=sys.stderr)
+        raise SystemExit(e.code)
+
+
+def _main() -> None:
+    args = sys.argv[1:]
+    if not args:
+        usage()
+    cmd = args[0].lower()
+    if cmd in ("-h", "--help", "help"):
+        usage()
+    if cmd == "list":
+        if len(args) != 1:
+            usage()
+        cmd_list()
+        return
+    if cmd == "stats":
+        if len(args) not in (1, 3):
+            usage()
+        cmd_stats(args)
+        return
+    if cmd in ("add", "remove"):
+        if len(args) != 2:
+            usage()
+        (cmd_add if cmd == "add" else cmd_remove)(args[1])
+        return
+    if cmd in ("pause", "resume"):
+        if len(args) != 2:
+            usage()
+        cmd_pause(args[1], paused=(cmd == "pause"))
+        return
+    usage()
+
+
+if __name__ == "__main__":
+    main()

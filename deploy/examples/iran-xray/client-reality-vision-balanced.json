@@ -1,0 +1,157 @@
+{
+  "log": { "loglevel": "warning" },
+  "dns": {
+    "servers": [
+      {
+        "address": "localhost",
+        "domains": ["geosite:category-ir", "geosite:private"],
+        "expectIPs": ["geoip:ir"]
+      },
+      "https://1.1.1.1/dns-query",
+      "https://8.8.8.8/dns-query"
+    ],
+    "queryStrategy": "UseIPv4",
+    "disableFallback": true,
+    "tag": "dns"
+  },
+  "inbounds": [
+    {
+      "tag": "socks",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": { "udp": true },
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": false }
+    },
+    {
+      "tag": "http",
+      "listen": "127.0.0.1",
+      "port": 10809,
+      "protocol": "http",
+      "sniffing": { "enabled": true, "destOverride": ["http", "tls", "quic"], "routeOnly": false }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "proxy-443",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [{
+          "address": "203.0.113.20",
+          "port": 443,
+          "users": [{
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "encryption": "none",
+            "flow": "xtls-rprx-vision"
+          }]
+        }]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.cloudflare.com",
+          "fingerprint": "chrome",
+          "publicKey": "-LsvFSSWY2t6LMyP23GAhk2I-64S3x6VakVCoVUQ9iM",
+          "shortId": "45a83332119989cd",
+          "spiderX": ""
+        }
+      }
+    },
+    {
+      "tag": "proxy-dl",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [{
+          "address": "entry.example.com",
+          "port": 443,
+          "users": [{
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "encryption": "none",
+            "flow": "xtls-rprx-vision"
+          }]
+        }]
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.cloudflare.com",
+          "fingerprint": "chrome",
+          "publicKey": "-LsvFSSWY2t6LMyP23GAhk2I-64S3x6VakVCoVUQ9iM",
+          "shortId": "45a83332119989cd",
+          "spiderX": ""
+        }
+      }
+    },
+    {
+      "tag": "proxy-53",
+      "protocol": "vless",
+      "settings": {
+        "vnext": [{
+          "address": "203.0.113.20",
+          "port": 53,
+          "users": [{
+            "id": "12b29642-dd65-427b-98a1-4d02ed472150",
+            "encryption": "none"
+          }]
+        }]
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "reality",
+        "realitySettings": {
+          "serverName": "www.cloudflare.com",
+          "fingerprint": "chrome",
+          "publicKey": "-LsvFSSWY2t6LMyP23GAhk2I-64S3x6VakVCoVUQ9iM",
+          "shortId": "45a83332119989cd",
+          "spiderX": ""
+        },
+        "xhttpSettings": { "path": "/shahrah", "mode": "stream-one" }
+      }
+    },
+    { "tag": "DIRECT", "protocol": "freedom" },
+    { "tag": "BLOCK", "protocol": "blackhole" }
+  ],
+  "burstObservatory": {
+    "subjectSelector": ["proxy-443", "proxy-dl", "proxy-53"],
+    "pingConfig": {
+      "destination": "http://www.gstatic.com/generate_204",
+      "interval": "1m",
+      "connectivity": "http://connectivitycheck.gstatic.com/generate_204",
+      "timeout": "5s",
+      "sampling": 2
+    }
+  },
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "balancers": [
+      {
+        "tag": "alive",
+        "selector": ["proxy-"],
+        "strategy": { "type": "leastPing" },
+        "fallbackTag": "proxy-443"
+      }
+    ],
+    "rules": [
+      { "type": "field", "inboundTag": ["dns"], "balancerTag": "alive" },
+      {
+        "type": "field",
+        "domain": ["geosite:category-ads-all", "geosite:malware", "geosite:phishing"],
+        "outboundTag": "BLOCK"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:category-ir", "geosite:private"],
+        "outboundTag": "DIRECT"
+      },
+      {
+        "type": "field",
+        "ip": ["geoip:ir", "geoip:private"],
+        "outboundTag": "DIRECT"
+      },
+      { "type": "field", "ip": ["::/0"], "outboundTag": "BLOCK" },
+      { "type": "field", "network": "tcp,udp", "balancerTag": "alive" }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+[Unit]
+Description=sni-watch — stream GE exit access.log to local file for multi-exit tail
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=8
+ExecStartPre=/bin/mkdir -p /var/lib/sni-watch
+ExecStartPre=/bin/touch /var/lib/sni-watch/ge-access.log
+ExecStartPre=/bin/chmod 644 /var/lib/sni-watch/ge-access.log
+ExecStart=/usr/local/lib/sni-watch/ge-log-relay.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
