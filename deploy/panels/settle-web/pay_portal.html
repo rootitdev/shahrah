@@ -83,6 +83,11 @@ input::placeholder{color:#64748b}
 .pay-qr-box #pay-qr{display:inline-block;padding:10px;background:#fff;border-radius:10px;line-height:0}
 .pay-qr-box #pay-qr img,.pay-qr-box #pay-qr canvas{display:block}
 .pay-qr-box .hint{margin-top:8px;font-size:11px;color:var(--mut)}
+.username-preview{margin:12px 0 14px;padding:14px 12px;border-radius:12px;border:1px solid #2563eb;background:linear-gradient(180deg,rgba(37,99,235,.18),rgba(15,23,42,.9));text-align:center}
+.username-preview-lbl{font-size:12px;color:#93c5fd;margin-bottom:8px}
+.username-preview-val{font-size:22px;font-weight:500;letter-spacing:.6px;direction:ltr;color:#e0f2fe;padding:10px 16px;border-radius:10px;background:#0b1528;border:2px solid #3b82f6;display:inline-block;min-width:min(100%,280px);box-shadow:0 0 0 4px var(--glow)}
+.username-preview-hint{margin-top:8px;font-size:11px;color:var(--mut);line-height:1.6}
+.signup-plans-hint{font-size:12px;color:var(--mut);margin:8px 0;padding:10px 12px;border-radius:10px;border:1px dashed var(--line);background:var(--soft);text-align:center;line-height:1.7}
 .sub-modal{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center;padding:16px;background:rgba(3,8,18,.72);backdrop-filter:blur(4px)}
 .sub-modal[hidden]{display:none!important}
 .sub-modal-card{width:min(440px,100%);background:var(--card);border:1px solid var(--line);border-radius:16px 16px 12px 12px;padding:18px 16px 16px;box-shadow:0 20px 50px #0008;max-height:92vh;overflow:auto}
@@ -127,13 +132,20 @@ color-scheme:dark;
     </div>
     <div id="box-signup" hidden>
       <h2 style="margin:0 0 8px;font-size:16px;font-weight:500">ثبت‌نام و خرید</h2>
-      <p class="sub">موبایل و نام انگلیسی را بزنید؛ نام کاربری خودکار ساخته و تا مهلت پرداخت رزرو می‌شود.</p>
+      <p class="sub">موبایل ۱۱ رقمی (از ۰۹) و نام انگلیسی کوچک را وارد کنید؛ پس از آن پلن‌ها و نام کاربری شما نمایش داده می‌شود.</p>
       <label>موبایل</label>
-      <input id="su-mobile" inputmode="tel" autocomplete="tel" placeholder="09121234567">
-      <label>نام (فقط انگلیسی)</label>
-      <input id="su-name" autocomplete="nickname" placeholder="peyman" pattern="[A-Za-z]+">
-      <div class="mut" id="su-preview" style="margin:4px 0 10px">نام کاربری پیشنهادی بعد از انتخاب پلن مشخص می‌شود.</div>
-      <div id="su-plans" style="margin-top:8px"></div>
+      <input id="su-mobile" inputmode="numeric" autocomplete="tel" maxlength="11" placeholder="09121234567">
+      <label>نام (فقط حروف کوچک انگلیسی، بدون فاصله)</label>
+      <input id="su-name" autocomplete="nickname" maxlength="20" placeholder="peyman" autocapitalize="off" spellcheck="false">
+      <div class="username-preview" id="su-username-box" hidden>
+        <div class="username-preview-lbl">نام کاربری شما (بعد از پرداخت با همین وارد می‌شوید)</div>
+        <div class="username-preview-val" id="su-username-val">—</div>
+        <div class="username-preview-hint">در صورت تکراری بودن، یک رقم به انتها اضافه می‌شود.</div>
+      </div>
+      <div class="signup-plans-hint" id="su-plans-hint">برای دیدن پلن‌ها، موبایل ۱۱ رقمی و نام انگلیسی (حداقل ۳ حرف) را کامل کنید.</div>
+      <div id="su-plans-wrap" hidden>
+        <div id="su-plans"></div>
+      </div>
     </div>
   </div>
 
@@ -476,43 +488,94 @@ function setMode(mode){
   $('tab-login').style.borderColor = mode==='login' ? 'var(--acc)' : 'var(--line)';
   $('tab-signup').style.borderColor = mode==='signup' ? 'var(--acc)' : 'var(--line)';
   flash('');
-  if (mode === 'signup') loadCatalog();
+  if (mode === 'signup'){
+    loadCatalog();
+    onSignupFieldChange();
+  }
+}
+function normSignupName(raw){
+  return String(raw || '').toLowerCase().replace(/[^a-z]/g, '');
+}
+function normSignupMobile(raw){
+  return digitsOnly(raw).slice(0, 11);
+}
+function signupFieldsReady(){
+  const mob = $('su-mobile').value;
+  const name = normSignupName($('su-name').value);
+  return /^09\d{9}$/.test(mob) && name.length >= 3 && name.length <= 20;
+}
+function onSignupFieldChange(){
+  const nameEl = $('su-name');
+  const mobEl = $('su-mobile');
+  const name = normSignupName(nameEl.value);
+  if (nameEl.value !== name) nameEl.value = name;
+  const mob = normSignupMobile(mobEl.value);
+  if (mobEl.value !== mob) mobEl.value = mob;
+  updateSignupPreview();
+  renderSignupPlansIfReady();
 }
 function updateSignupPreview(){
-  const name = ($('su-name').value||'').toLowerCase().replace(/[^a-z]/g,'');
-  const mob = ($('su-mobile').value||'').replace(/\D/g,'');
-  const dig = mob.length >= 3 ? mob.slice(-3) : '???';
-  $('su-preview').textContent = name.length >= 3
-    ? ('نام کاربری پیشنهادی: ' + name.slice(0,12) + dig + ' (در صورت تکراری، رقم تصادفی)')
-    : 'نام کاربری پیشنهادی بعد از وارد کردن نام مشخص می‌شود.';
+  const box = $('su-username-box');
+  const val = $('su-username-val');
+  if (!signupFieldsReady()){
+    box.hidden = true;
+    return;
+  }
+  const name = normSignupName($('su-name').value);
+  const mob = $('su-mobile').value;
+  val.textContent = name.slice(0, 12) + mob.slice(-3);
+  box.hidden = false;
+}
+function renderSignupPlansIfReady(){
+  const hint = $('su-plans-hint');
+  const wrap = $('su-plans-wrap');
+  const box = $('su-plans');
+  const d = state.catalog;
+  if (!signupFieldsReady() || !d){
+    if (wrap) wrap.hidden = true;
+    if (hint) hint.hidden = false;
+    return;
+  }
+  if (!d.has_card){
+    if (wrap) wrap.hidden = false;
+    if (hint) hint.hidden = true;
+    box.innerHTML = '<div class="mut">فروش اکانت جدید فعلاً فعال نیست (کارت فروشنده ثبت نشده).</div>';
+    return;
+  }
+  if (!d.plans || !d.plans.length){
+    if (wrap) wrap.hidden = false;
+    if (hint) hint.hidden = true;
+    box.innerHTML = '<div class="mut">پلنی برای فروش تعریف نشده.</div>';
+    return;
+  }
+  if (wrap) wrap.hidden = false;
+  if (hint) hint.hidden = true;
+  box.innerHTML = d.plans.map(p =>
+    `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h)} | ${p.days} روز | ${esc(p.users_h)}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
+  ).join('');
+  box.querySelectorAll('.plan').forEach(el => {
+    el.onclick = () => signupBuy(Number(el.dataset.id));
+  });
 }
 async function loadCatalog(){
   try {
     const d = await api('api/catalog');
     state.catalog = d;
-    const box = $('su-plans');
-    if (!d.has_card){
-      box.innerHTML = '<div class="mut">فروش اکانت جدید فعلاً فعال نیست (کارت فروشنده ثبت نشده).</div>';
-      return;
-    }
-    if (!d.plans || !d.plans.length){
-      box.innerHTML = '<div class="mut">پلنی برای فروش تعریف نشده.</div>';
-      return;
-    }
-    box.innerHTML = d.plans.map(p =>
-      `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h)} | ${p.days} روز | ${esc(p.users_h)}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
-    ).join('');
-    box.querySelectorAll('.plan').forEach(el => {
-      el.onclick = () => signupBuy(Number(el.dataset.id));
-    });
+    renderSignupPlansIfReady();
   } catch(e){ flash(e.message,'err'); }
 }
 async function signupBuy(planId){
   flash('');
-  const mobile = $('su-mobile').value.trim();
-  const name = $('su-name').value.trim();
-  if (!mobile){ flash('موبایل را وارد کنید.','err'); return; }
-  if (!name){ flash('نام انگلیسی را وارد کنید.','err'); return; }
+  const mobile = normSignupMobile($('su-mobile').value);
+  const name = normSignupName($('su-name').value);
+  if (!/^09\d{9}$/.test(mobile)){
+    flash('موبایل باید ۱۱ رقم و با 09 شروع شود (فقط عدد).','err');
+    return;
+  }
+  if (name.length < 3 || name.length > 20){
+    flash('نام: فقط حروف کوچک انگلیسی، ۳ تا ۲۰ حرف.','err');
+    return;
+  }
   try {
     const d = await api('api/signup', {mobile, name, plan_id: planId});
     const ord = d.order;
@@ -587,8 +650,8 @@ async function refreshOrder(opts){
 }
 $('tab-login').onclick = () => setMode('login');
 $('tab-signup').onclick = () => setMode('signup');
-$('su-name').addEventListener('input', updateSignupPreview);
-$('su-mobile').addEventListener('input', updateSignupPreview);
+$('su-name').addEventListener('input', onSignupFieldChange);
+$('su-mobile').addEventListener('input', onSignupFieldChange);
 $('btn-search').onclick = search;
 $('uname').addEventListener('keydown', e => { if (e.key==='Enter') $('upass').focus(); });
 $('upass').addEventListener('keydown', e => { if (e.key==='Enter') search(); });
