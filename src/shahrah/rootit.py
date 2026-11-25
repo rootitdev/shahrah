@@ -328,7 +328,25 @@ def resolve_subscription_url(
     if not _USER_RE.fullmatch(username):
         raise ConfigError("invalid username")
     try:
-        user = client.get_user(username)
+        try:
+            user = client.get_user(username)
+        except PanelError as exc:
+            if "404" not in str(exc):
+                raise
+            matches = set()
+            offset = 0
+            while True:
+                rows = client.list_users(offset=offset, limit=100).get("users", [])
+                matches.update(
+                    row["username"] for row in rows
+                    if str(row.get("username", "")).lower() == username.lower()
+                )
+                if len(rows) < 100 or len(matches) > 1:
+                    break
+                offset += 100
+            if len(matches) != 1:
+                raise
+            user = client.get_user(matches.pop())
     except PanelError as exc:
         msg = str(exc)
         if "404" in msg:
@@ -399,7 +417,7 @@ def _qr_js_bytes() -> bytes:
 
 def _user_form(*, require_password: bool, error: str = "") -> bytes:
     pw = (
-        '<label>PIN شش‌کاراکتری</label><input name="password" type="text" inputmode="text" autocomplete="one-time-code" maxlength="6" pattern="[a-z0-9]{6}" placeholder="مثلا ab12cd">'
+        '<label>PIN شش‌کاراکتری</label><input name="password" type="text" inputmode="text" autocomplete="one-time-code" maxlength="6" pattern="[A-Za-z0-9]{6}" placeholder="مثلا ab12cd">'
         if require_password
         else '<p class="muted">حالت اضطراری: فقط نام کاربری پنل پاسارگارد کافی است.</p>'
     )
@@ -837,15 +855,24 @@ def make_handler(config_path: Path) -> type[BaseHTTPRequestHandler]:
                     _user_form(require_password=cfg.require_password, error="نام کاربری نامعتبر"),
                 )
             if cfg.require_password:
+                if username not in cfg.pins:
+                    matches = [name for name in cfg.pins if name.lower() == username.lower()]
+                    if len(matches) == 1:
+                        username = matches[0]
                 encoded = cfg.pins.get(username, "")
-                if not encoded or not verify_password(password, encoded):
+                if (
+                    not encoded
+                    or not re.fullmatch(r"[A-Za-z0-9]{6}", password)
+                    or not verify_password(password.lower(), encoded)
+                ):
                     return self._send(
                         403,
                         _user_form(require_password=cfg.require_password, error="رمز نادرست"),
                     )
             try:
                 client = make_panel_client(cfg)
-                url, _user = resolve_subscription_url(client, cfg, username)
+                url, user = resolve_subscription_url(client, cfg, username)
+                username = str(user.get("username") or username)
                 cfg2, pin = ensure_user_pin(cfg, username)
                 if cfg2 is not cfg or cfg.pins.get(username) != cfg2.pins.get(username):
                     save_config(config_path, cfg2)

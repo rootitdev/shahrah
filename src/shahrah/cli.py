@@ -2504,6 +2504,8 @@ def _run(args: argparse.Namespace) -> int:
 
     if args.command == "hysteria2":
         return _run_hysteria2(args, state_path, state, out)
+    if args.command == "user":
+        if args.user_command == "add":
             new_state, user = state.with_user(args.label)
             save_state(state_path, new_state)
             out.write(f"{user.label} {user.uuid}\n")

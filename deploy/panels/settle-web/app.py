@@ -2004,6 +2004,14 @@ def shop_payload(admin_id: int) -> dict:
         plans = pay.list_plans(conn, admin_id, active_only=False)
         pending = pay.list_pending_orders(conn, admin_id, limit=40)
         recent = pay.list_recent_paid_orders(conn, admin_id, limit=40)
+        signup_contacts = [
+            dict(row) for row in conn.execute(
+                "SELECT username, display_name, mobile FROM pay_order WHERE id IN ("
+                "SELECT MAX(id) FROM pay_order WHERE admin_id = ? AND is_signup = 1 "
+                "AND mobile <> '' GROUP BY username) ORDER BY id DESC",
+                (admin_id,),
+            )
+        ]
         conn.commit()
     finally:
         conn.close()
@@ -2041,6 +2049,7 @@ def shop_payload(admin_id: int) -> dict:
         "plans": plans,
         "pending_orders": pending_pub,
         "recent_orders": recent_pub,
+        "signup_contacts": signup_contacts,
         "pay_url": f"{origin}/pay/",
         # Always include URL so radio preview works; UI only shows it in auto mode.
         "sms_webhook_url": webhook,
@@ -2798,9 +2807,15 @@ tr.plan-promo-row td { background:linear-gradient(90deg,rgba(245,158,11,.12),tra
   display:flex; flex-wrap:wrap; gap:12px 18px; align-items:center;
   padding:4px 0;
 }
-.shop-row-plan .shop-plan-opts label.hint {
-  display:inline-flex !important; flex-direction:row !important; align-items:center;
-  gap:8px; margin:0; width:auto; max-width:none;
+.shop-row-plan .shop-plan-opts label.hint:not([hidden]) {
+  display:inline-flex; flex-direction:row; align-items:center; gap:8px;
+}
+.shop-row-plan .shop-plan-opts label[hidden] { display:none; }
+.shop-row-plan .shop-plan-opts input[type="checkbox"] {
+  width:18px !important; height:18px; flex:0 0 18px; padding:0; accent-color:var(--acc);
+}
+@media (max-width:600px) {
+  .shop-row-plan .shop-plan-opts { flex-direction:column; align-items:stretch; gap:8px; }
 }
 .brand { font-weight:800; padding:8px 12px 16px; font-size:16px; line-height:1.35; min-width:0; }
 .brand #brand-name, .brand .brand-name {
@@ -3388,6 +3403,10 @@ body.ro .pay-box.on { display:block; }
     <div id="shop-recent" style="margin-top:8px"></div>
   </section>
   <section class="card">
+    <h2>شماره‌های ثبت‌نام</h2>
+    <div id="shop-signup-contacts"></div>
+  </section>
+  <section class="card">
     <h2>کارت بانکی دریافت وجه</h2>
     <div class="shop-row shop-row-card">
       <label class="hint">شماره کارت<input id="shop-card" inputmode="numeric" placeholder="6037…"></label>
@@ -3422,8 +3441,8 @@ body.ro .pay-box.on { display:block; }
       <label class="hint">قیمت تومان<input id="shop-price" type="number" min="1000" step="1000"></label>
       <label class="hint shop-plan-desc">توضیحات (اختیاری)<textarea id="shop-desc" rows="2" placeholder="مثلاً: مناسب استفاده روزمره"></textarea></label>
       <div class="shop-plan-opts">
-        <label class="hint" id="shop-unlim-wrap" hidden><input type="checkbox" id="shop-unlim"> نامحدود (فقط ادمین ۱)</label>
-        <label class="hint"><input type="checkbox" id="shop-promo"> فروش ویژه / موقت (رنگ متمایز در /pay/)</label>
+        <label class="hint" id="shop-unlim-wrap" hidden><input type="checkbox" id="shop-unlim"><span>نامحدود (فقط ادمین ۱)</span></label>
+        <label class="hint"><input type="checkbox" id="shop-promo"><span>فروش ویژه / موقت (رنگ متمایز در /pay/)</span></label>
       </div>
       <button class="btn shop-row-btn" id="shop-plan-add" type="button">افزودن پلن</button>
     </div>
@@ -4134,10 +4153,15 @@ async function loadShop(){
   if ($('shop-mode-manual')) $('shop-mode-manual').checked = mode === 'manual';
   if ($('shop-mode-auto')) $('shop-mode-auto').checked = mode === 'auto';
   renderShopMode(d);
+  const contacts = d.signup_contacts || [];
+  $('shop-signup-contacts').innerHTML = contacts.length
+    ? `<div class="table-wrap"><table><thead><tr><th>نام کاربری</th><th>نام</th><th>موبایل</th></tr></thead><tbody>${
+      contacts.map(c => `<tr><td>${esc(c.username)}</td><td>${esc(c.display_name || '—')}</td><td class="num" dir="ltr">${esc(c.mobile)}</td></tr>`).join('')
+    }</tbody></table></div>`
+    : '<div class="empty">هنوز شماره‌ای ثبت نشده است.</div>';
   const canUnlim = !!d.can_unlimited;
   if ($('shop-unlim-wrap')) {
     $('shop-unlim-wrap').hidden = !canUnlim;
-    $('shop-unlim-wrap').style.display = canUnlim ? 'flex' : 'none';
   }
   if (!canUnlim) {
     if ($('shop-unlim')) $('shop-unlim').checked = false;
