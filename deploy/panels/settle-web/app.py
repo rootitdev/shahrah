@@ -111,6 +111,11 @@ def db() -> sqlite3.Connection:
         conn.execute("ALTER TABLE seller ADD COLUMN debt_toman INTEGER NOT NULL DEFAULT 0")
     pay.ensure_tables(conn)
     conn.execute(
+        "CREATE TABLE IF NOT EXISTS shop_hidden_item ("
+        "admin_id INTEGER NOT NULL, kind TEXT NOT NULL, item_key TEXT NOT NULL, "
+        "PRIMARY KEY (admin_id, kind, item_key))"
+    )
+    conn.execute(
         """CREATE TABLE IF NOT EXISTS ledger (
             admin_id INTEGER NOT NULL,
             user_id INTEGER NOT NULL,
@@ -1996,6 +2001,50 @@ def create_pay_signup_order(
     }
 
 
+SHOP_LISTS = {
+    "signup": ("is_signup = 1 AND mobile <> ''", "username"),
+    "recent": ("status = 'paid'", "CAST(id AS TEXT)"),
+}
+
+
+def shop_list_payload(admin_id: int, kind: str, page: int, *, hide_id: int = 0) -> dict:
+    if kind not in SHOP_LISTS:
+        raise ValueError("فهرست نامعتبر است.")
+    condition, key = SHOP_LISTS[kind]
+    conn = db()
+    try:
+        if hide_id:
+            conn.execute(
+                f"INSERT OR IGNORE INTO shop_hidden_item (admin_id, kind, item_key) "
+                f"SELECT admin_id, ?, {key} FROM pay_order "
+                f"WHERE admin_id = ? AND id = ? AND {condition}",
+                (kind, admin_id, hide_id),
+            )
+        where = (
+            f"admin_id = ? AND {condition} AND {key} NOT IN ("
+            "SELECT item_key FROM shop_hidden_item WHERE admin_id = ? AND kind = ?)"
+        )
+        order = "COALESCE(paid_ts, ts) DESC, id DESC"
+        if kind == "signup":
+            where = f"id IN (SELECT MAX(id) FROM pay_order WHERE {where} GROUP BY username)"
+            order = "id DESC"
+        args = (admin_id, admin_id, kind)
+        count = conn.execute(f"SELECT COUNT(*) FROM pay_order WHERE {where}", args).fetchone()[0]
+        pages = max(1, (count + 5) // 6)
+        page = max(1, min(page, pages))
+        rows = conn.execute(
+            f"SELECT * FROM pay_order WHERE {where} ORDER BY {order} LIMIT 6 OFFSET ?",
+            (*args, (page - 1) * 6),
+        )
+        if kind == "signup":
+            items = [{k: row[k] for k in ("id", "username", "display_name", "mobile")} for row in rows]
+        else:
+            items = [_order_public(dict(row)) for row in rows]
+        return {"items": items, "page": page, "pages": pages}
+    finally:
+        conn.close()
+
+
 def shop_payload(admin_id: int) -> dict:
     conn = db()
     try:
@@ -2003,15 +2052,6 @@ def shop_payload(admin_id: int) -> dict:
         shop = pay.get_seller_shop(conn, admin_id)
         plans = pay.list_plans(conn, admin_id, active_only=False)
         pending = pay.list_pending_orders(conn, admin_id, limit=40)
-        recent = pay.list_recent_paid_orders(conn, admin_id, limit=40)
-        signup_contacts = [
-            dict(row) for row in conn.execute(
-                "SELECT username, display_name, mobile FROM pay_order WHERE id IN ("
-                "SELECT MAX(id) FROM pay_order WHERE admin_id = ? AND is_signup = 1 "
-                "AND mobile <> '' GROUP BY username) ORDER BY id DESC",
-                (admin_id,),
-            )
-        ]
         conn.commit()
     finally:
         conn.close()
@@ -2030,11 +2070,6 @@ def shop_payload(admin_id: int) -> dict:
         pub = _order_public(o)
         if pub:
             pending_pub.append(pub)
-    recent_pub = []
-    for o in recent:
-        pub = _order_public(o)
-        if pub:
-            recent_pub.append(pub)
     sms = sms_settings()
     origin = _public_panel_base()
     webhook = f"{origin}/settle/api/sms?token={seller_tok}"
@@ -2048,8 +2083,6 @@ def shop_payload(admin_id: int) -> dict:
         "can_unlimited": int(admin_id) == pay.UNLIMITED_ADMIN_ID,
         "plans": plans,
         "pending_orders": pending_pub,
-        "recent_orders": recent_pub,
-        "signup_contacts": signup_contacts,
         "pay_url": f"{origin}/pay/",
         # Always include URL so radio preview works; UI only shows it in auto mode.
         "sms_webhook_url": webhook,
@@ -2780,6 +2813,8 @@ aside.menu { background:var(--side); border-left:1px solid var(--line); padding:
 .shop-row label.hint textarea {
   width:100% !important; max-width:100%; min-width:0; box-sizing:border-box; display:block; margin:0 !important;
 }
+.shop-list-pages { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.shop-list-pages button, [data-hide] { width:auto; margin:0; }
 .shop-row .shop-row-btn { align-self:end; }
 .shop-row-card { grid-template-columns:minmax(0, 1.1fr) minmax(0, 1fr); }
 td.num { white-space:nowrap; }
@@ -4153,12 +4188,7 @@ async function loadShop(){
   if ($('shop-mode-manual')) $('shop-mode-manual').checked = mode === 'manual';
   if ($('shop-mode-auto')) $('shop-mode-auto').checked = mode === 'auto';
   renderShopMode(d);
-  const contacts = d.signup_contacts || [];
-  $('shop-signup-contacts').innerHTML = contacts.length
-    ? `<div class="table-wrap"><table><thead><tr><th>نام کاربری</th><th>نام</th><th>موبایل</th></tr></thead><tbody>${
-      contacts.map(c => `<tr><td>${esc(c.username)}</td><td>${esc(c.display_name || '—')}</td><td class="num" dir="ltr">${esc(c.mobile)}</td></tr>`).join('')
-    }</tbody></table></div>`
-    : '<div class="empty">هنوز شماره‌ای ثبت نشده است.</div>';
+  await Promise.all([loadShopList('signup', 1), loadShopList('recent', 1)]);
   const canUnlim = !!d.can_unlimited;
   if ($('shop-unlim-wrap')) {
     $('shop-unlim-wrap').hidden = !canUnlim;
@@ -4304,28 +4334,59 @@ function renderShopMode(d){
       });
     }
   }
-  renderShopRecent(d);
 }
-function renderShopRecent(d){
-  const box = $('shop-recent');
-  if (!box) return;
-  const items = (d && d.recent_orders) || [];
-  if (!items.length){ box.innerHTML = '<div class="empty">هنوز خرید تأییدشده‌ای نیست.</div>'; return; }
-  box.innerHTML = `<div class="table-wrap"><table><thead><tr><th>یوزر</th><th>موبایل</th><th>پلن</th><th>مبلغ</th><th>زمان</th></tr></thead><tbody>${
-    items.map(o => `<tr>
-      <td><b>${esc(o.username)}</b><div class="mut">#${o.id}${o.is_signup?' · ثبت‌نام جدید':''}${o.display_name?' · '+esc(o.display_name):''}</div></td>
-      <td class="num" dir="ltr">${esc(o.mobile || '—')}</td>
-      <td class="mut">${(Number(o.gib)||0)<=0?'نامحدود':(o.gib+' گیگ')} / ${o.days} روز</td>
-      <td class="num">${esc(o.pay_h || o.price_h || '—')}</td>
-      <td class="mut">${esc(o.paid_h || '—')}</td>
-    </tr>`).join('')}</tbody></table></div>`;
+async function loadShopList(kind, page, hideId = 0){
+  const signup = kind === 'signup';
+  const box = $(signup ? 'shop-signup-contacts' : 'shop-recent');
+  const seller = shopAdminId;
+  const request = Symbol();
+  box.shopListRequest = request;
+  const buttons = [...box.querySelectorAll('button:not(:disabled)')];
+  buttons.forEach(btn => { btn.disabled = true; });
+  const query = new URLSearchParams({kind, page, id: seller});
+  const path = 'api/shop/list?' + query.toString();
+  try {
+    const d = await api(path, hideId ? {hide_id: hideId} : undefined);
+    if (!d || seller !== shopAdminId || box.shopListRequest !== request) return;
+    if (!d.items.length){
+      box.innerHTML = '<div class="empty">موردی برای نمایش نیست.</div>';
+      return;
+    }
+    const headers = signup
+      ? '<th>نام کاربری</th><th>نام</th><th>موبایل</th>'
+      : '<th>نام کاربری</th><th>موبایل</th><th>پلن</th><th>مبلغ</th><th>زمان</th>';
+    box.innerHTML = `<div class="table-wrap"><table><thead><tr>${headers}<th>عملیات</th></tr></thead><tbody>${
+      d.items.map(o => `<tr><td><b>${esc(o.username)}</b></td>${
+        signup ? `<td>${esc(o.display_name || '—')}</td>` : ''
+      }<td class="num" dir="ltr">${esc(o.mobile || '—')}</td>${
+        signup ? '' : `<td>${(Number(o.gib)||0)<=0?'نامحدود':(o.gib+' گیگ')} / ${o.days} روز</td>
+        <td class="num">${esc(o.pay_h || o.price_h || '—')}</td><td>${esc(o.paid_h || '—')}</td>`
+      }<td><button type="button" class="ghost" data-hide="${o.id}">حذف</button></td></tr>`).join('')
+    }</tbody></table></div>${d.pages > 1 ? `<div class="shop-list-pages" aria-label="صفحه‌بندی">
+      <button type="button" class="ghost" data-page="${d.page - 1}" ${d.page === 1 ? 'disabled' : ''}>قبلی</button>
+      <span>صفحهٔ ${d.page} از ${d.pages}</span>
+      <button type="button" class="ghost" data-page="${d.page + 1}" ${d.page === d.pages ? 'disabled' : ''}>بعدی</button>
+    </div>` : ''}`;
+    box.querySelectorAll('[data-page]').forEach(btn => {
+      btn.onclick = () => loadShopList(kind, Number(btn.dataset.page));
+    });
+    box.querySelectorAll('[data-hide]').forEach(btn => {
+      btn.onclick = () => {
+        if (seller !== shopAdminId) return;
+        if (confirm('این مورد از فهرست حذف شود؟')) loadShopList(kind, d.page, Number(btn.dataset.hide));
+      };
+    });
+  } catch (e) {
+    if (seller === shopAdminId && box.shopListRequest === request) flash(e.message, 'err');
+  } finally {
+    buttons.forEach(btn => { btn.disabled = false; });
+  }
 }
 if ($('shop-mode-manual')) $('shop-mode-manual').onchange = () => {
   if ($('shop-mode-manual').checked) renderShopMode({
     ...(window._lastShop||{}),
     pay_confirm_mode:'manual',
     pending_orders: (window._lastShop&&window._lastShop.pending_orders)||[],
-    recent_orders: (window._lastShop&&window._lastShop.recent_orders)||[],
     sms_enabled:false
   });
 };
@@ -4846,6 +4907,9 @@ class Handler(BaseHTTPRequestHandler):
         q = parse_qs(parsed.query)
         is_op = sess["role"] == "op"
         try:
+            if path == "/api/shop/list":
+                self._shop_list(sess, q)
+                return
             if path == "/api/shop":
                 aid = sess["admin_id"] if not is_op else as_int((q.get("id") or ["0"])[0])
                 if is_op and aid < 1:
@@ -5109,6 +5173,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         self._send(404, b"not found", "text/plain")
 
+    def _shop_list(self, sess: dict, query: dict, *, hide_id: int = 0) -> None:
+        admin_id = (
+            as_int((query.get("id") or ["0"])[0]) if sess["role"] == "op" else sess["admin_id"]
+        )
+        if admin_id < 1:
+            self._fail("ادمین نامعتبر است.")
+            return
+        kind = (query.get("kind") or [""])[0]
+        page = as_int((query.get("page") or ["1"])[0], 1)
+        self._ok(shop_list_payload(admin_id, kind, page, hide_id=hide_id))
+
     def do_POST(self) -> None:  # noqa: N802
         path = urlparse(self.path).path.rstrip("/") or "/"
         if path == "/login":
@@ -5134,6 +5209,13 @@ class Handler(BaseHTTPRequestHandler):
         is_op = sess["role"] == "op"
         data = self._read_json()
         try:
+            if path == "/api/shop/list":
+                hide_id = as_int(data.get("hide_id"))
+                if hide_id < 1:
+                    self._fail("مورد نامعتبر است.")
+                    return
+                self._shop_list(sess, parse_qs(urlparse(self.path).query), hide_id=hide_id)
+                return
             if path == "/api/shop":
                 aid = sess["admin_id"] if not is_op else as_int(data.get("admin_id") or sess["admin_id"])
                 if not is_op:
