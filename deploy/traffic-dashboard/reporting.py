@@ -47,6 +47,44 @@ def jalali(day):
     return f"{y:04}-{m:02}-{d:02}"
 
 
+def jalali_to_gregorian(text):
+    parts = text.strip().replace("/", "-").split("-")
+    if len(parts) != 3:
+        raise ValueError("Invalid Jalali date")
+    jy, jm, jd = (int(part) for part in parts)
+    if not 1 <= jm <= 12 or not 1 <= jd <= (31 if jm <= 6 else 30):
+        raise ValueError("Invalid Jalali date")
+    jy -= 979
+    days = 365 * jy + (jy // 33) * 8 + ((jy % 33) + 3) // 4
+    days += (jm - 1) * 31 if jm <= 7 else (jm - 1) * 30 + 6
+    days += jd - 1 + 79
+    gy = 1600 + 400 * (days // 146097)
+    days %= 146097
+    leap = True
+    if days >= 36525:
+        days -= 1
+        gy += 100 * (days // 36524)
+        days %= 36524
+        if days >= 365:
+            days += 1
+        else:
+            leap = False
+    gy += 4 * (days // 1461)
+    days %= 1461
+    if days > 365:
+        leap = False
+        days -= 1
+        gy += days // 365
+        days %= 365
+    gd = days + 1
+    month_days = [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    gm = 1
+    while gd > month_days[gm - 1]:
+        gd -= month_days[gm - 1]
+        gm += 1
+    return date(gy, gm, gd)
+
+
 def day_usage():
     return {"rx": 0, "tx": 0, "estimated": False, "gap": False, "covered_ns": 0}
 

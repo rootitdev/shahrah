@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from settings import initialize_settings, save, settings, snapshot_csv
 from views import overview
+from reporting import jalali_to_gregorian
 from ingestion import accept, initialize, token_hash
 
 
@@ -40,10 +41,16 @@ def password_hash(password, salt):
 def document(title, content):
     return f"""<!doctype html><html lang="fa" dir="rtl"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>{title}</title>
-<style>*{{box-sizing:border-box}}body{{margin:auto;max-width:980px;padding:24px;background:#f6f5ef;color:#172d32;font:16px/1.8 Tahoma,sans-serif}}
-h1{{font-size:1.6rem}}main{{padding:20px;background:white;border:1px solid #ddd;border-radius:12px}}
-section{{overflow-x:auto}}table{{width:100%;border-collapse:collapse}}td,th{{padding:10px;text-align:right;border-bottom:1px solid #ddd}}
-input,button{{font:inherit;padding:6px 12px;margin:4px}}label{{display:block}}button{{color:white;background:#155951;border:0;border-radius:6px}}</style>
+<style>@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap');
+:root{{--bg:#0b1220;--surface:#121c2d;--surface2:#18263a;--line:#2b3a52;--text:#e6edf7;--muted:#9eacc0;--accent:#38bdf8}}
+*{{box-sizing:border-box}}body{{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0,#1a3550 0,transparent 34rem),var(--bg);color:var(--text);font:15px/1.9 Vazirmatn,Tahoma,sans-serif}}
+main{{width:min(1120px,calc(100% - 32px));margin:32px auto;padding:28px;background:rgba(18,28,45,.94);border:1px solid var(--line);border-radius:22px;box-shadow:0 24px 70px #0005}} h1{{margin:0 0 14px;font-size:clamp(1.35rem,3vw,2rem)}}
+nav{{display:flex;gap:12px;flex-wrap:wrap;margin:0 0 20px;padding-bottom:14px;border-bottom:1px solid var(--line)}} a{{color:var(--accent);text-underline-offset:4px}}p{{margin:8px 0;color:var(--muted)}}
+section{{margin:16px 0;padding:20px;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}} h2{{margin:0 0 10px;font-size:1.2rem}}details{{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}}summary{{cursor:pointer;color:#dbeafe;font-weight:600}}
+table{{width:100%;border-collapse:separate;border-spacing:0;margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden}}th,td{{padding:10px 12px;text-align:right;border-bottom:1px solid var(--line)}}th{{background:var(--surface2);color:#dbeafe}}tr:last-child td{{border-bottom:0}}
+form{{display:grid;gap:10px;max-width:620px;margin:12px 0}}label{{display:grid;gap:5px;color:#dbeafe;font-weight:500}}input,select,button{{font:inherit;border-radius:10px;padding:9px 12px;border:1px solid var(--line)}}input,select{{width:100%;background:#0d1728;color:var(--text)}}button{{width:max-content;color:#06121d;background:var(--accent);border:0;font-weight:700;cursor:pointer}}
+@media(max-width:640px){{main{{width:calc(100% - 20px);margin:10px auto;padding:16px;border-radius:16px}}section{{padding:14px;margin:12px 0}}table{{font-size:13px}}th,td{{padding:8px}}}}
+</style>
 <main><h1>{title}</h1>{content}</main></html>""".encode()
 
 
@@ -58,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type",kind)
         self.send_header("Cache-Control","no-store")
         self.send_header("X-Content-Type-Options","nosniff")
-        self.send_header("Content-Security-Policy","default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src https://static.cloudflareinsights.com; img-src 'self' data:; connect-src https://cloudflareinsights.com https://*.cloudflareinsights.com; form-action 'self'; frame-ancestors 'none'")
         self.send_header("Content-Length",str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -72,6 +79,8 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path=urlsplit(self.path).path
+        if path == "/favicon.ico":
+            return self.reply(200, b"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='#38bdf8'/><path d='M8 17h16M16 8v16' stroke='#0b1220' stroke-width='4'/></svg>", "image/svg+xml")
         if path not in ("/", "/settings", "/export"):
             return self.reply(404)
         with closing(sqlite3.connect(self.server.database)) as db:
@@ -84,7 +93,8 @@ class Handler(BaseHTTPRequestHandler):
                                   [("Content-Disposition",'attachment; filename="traffic.csv"')])
             try:
                 query=parse_qs(urlsplit(self.path).query,max_num_fields=6)
-                end=query.get("end",[None])[0]
+                end_value=query.get("end",[None])[0]
+                end=jalali_to_gregorian(end_value).isoformat() if end_value else None
                 content='<nav><a href="/settings">تنظیمات و ثبت مالی</a></nav>'+overview(
                     db,end,migrated=int(query.get("migrated",["100"])[0]),
                     retained_rent=int(query.get("retained",["0"])[0]))

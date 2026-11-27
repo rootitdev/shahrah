@@ -30,7 +30,7 @@ def overview(db, selected=None, *, migrated=100, retained_rent=0):
     end=min(today,date.fromisoformat(selected)) if selected else today
     start=month_start(end)
     body=[f'<p>دورهٔ شمسی {jalali(start)} تا {jalali(end)} · مبالغ به تومان</p>',
-          '<form method="get"><label>تاریخ پایان گزارش <input type="date" name="end" value="'+end.isoformat()+'"></label><button>نمایش</button></form>']
+          '<form method="get"><label>تاریخ پایان گزارش به شمسی <input inputmode="numeric" name="end" value="'+jalali(end)+'" placeholder="۱۴۰۵-۰۹-۰۶"></label><button>نمایش گزارش</button></form>']
     estimated_cost=Decimal(0)
     network_bytes=0
     exits={}
