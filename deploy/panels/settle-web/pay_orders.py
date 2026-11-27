@@ -801,9 +801,9 @@ def reset_user_usage(username: str) -> dict:
 
 
 def apply_topup(username: str, gib: float, days: int, hours: int = 0) -> dict:
-    """Renew pack: set data_limit to purchased size, reset used_traffic to 0, extend expire.
+    """Renew pack: set data_limit to purchased size, reset used_traffic, expire from *now*.
 
-    Previous ceiling/usage does not carry into the new period.
+    A new purchase is a fresh period (not remaining days + plan days).
     gib <= 0 means unlimited volume (panel data_limit = 0).
     """
     days_v, hours_v = _coerce_duration(days, hours)
@@ -822,22 +822,7 @@ def apply_topup(username: str, gib: float, days: int, hours: int = 0) -> dict:
 
     now = int(time.time())
     cur_exp = user.get("expire")
-    if cur_exp is None or cur_exp == "" or cur_exp == 0:
-        base = now
-    else:
-        try:
-            if isinstance(cur_exp, str) and "T" in cur_exp:
-                # ISO datetime from API
-                from datetime import datetime
-
-                base = int(datetime.fromisoformat(cur_exp.replace("Z", "+00:00")).timestamp())
-            else:
-                base = int(cur_exp)
-        except (TypeError, ValueError):
-            base = now
-    if base < now:
-        base = now
-    new_exp = base + duration_seconds(days_v, hours_v)
+    new_exp = now + duration_seconds(days_v, hours_v)
 
     uname = urllib.parse.quote(username, safe="")
     # Reset usage first so old traffic does not count against the new pack.
