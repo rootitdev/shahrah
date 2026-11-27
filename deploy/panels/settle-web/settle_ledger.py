@@ -443,7 +443,7 @@ def ym_label_fa(ym: str) -> str:
 
 
 def monthly_sales(conn: sqlite3.Connection, months: int = 12, admin_id: int | None = None) -> dict:
-    """Aggregate charge settlements and waives by Jalali calendar month (Tehran)."""
+    """Aggregate settlements and paid unlimited orders by Jalali month (Tehran)."""
     months = max(1, min(36, int(months)))
     cutoff = time.time() - months * 31 * 86400
     args: list = [cutoff]
@@ -453,9 +453,19 @@ def monthly_sales(conn: sqlite3.Connection, months: int = 12, admin_id: int | No
         args.append(admin_id)
     rows = conn.execute(
         f"SELECT admin_id, ts, kind, delta_bytes, toman, users, note, "
-        f"COALESCE(method, '') AS method FROM settlement {where} ORDER BY ts",
+        f"COALESCE(method, '') AS method, 0 AS unlimited FROM settlement {where} ORDER BY ts",
         args,
     ).fetchall()
+    if conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='pay_order'"
+    ).fetchone():
+        order_where = where.replace("ts >= ?", "paid_ts >= ?")
+        rows.extend(conn.execute(
+            "SELECT admin_id, paid_ts AS ts, 'charge' AS kind, 0 AS delta_bytes, "
+            "pay_amount AS toman, 1 AS users, '' AS note, 'card' AS method, 1 AS unlimited "
+            f"FROM pay_order {order_where} AND status='paid' AND gib=0",
+            args,
+        ).fetchall())
     by_month: dict[str, dict] = {}
     by_admin: dict[str, dict[int, dict]] = {}
     for r in rows:
@@ -469,6 +479,7 @@ def monthly_sales(conn: sqlite3.Connection, months: int = 12, admin_id: int | No
                 "sales_toman": 0,
                 "sales_bytes": 0,
                 "charge_count": 0,
+                "unlimited_count": 0,
                 "waive_toman": 0,
                 "waive_bytes": 0,
                 "waive_count": 0,
@@ -484,6 +495,7 @@ def monthly_sales(conn: sqlite3.Connection, months: int = 12, admin_id: int | No
                 "sales_toman": 0,
                 "sales_bytes": 0,
                 "charge_count": 0,
+                "unlimited_count": 0,
                 "waive_toman": 0,
                 "waive_bytes": 0,
                 "waive_count": 0,
@@ -493,12 +505,14 @@ def monthly_sales(conn: sqlite3.Connection, months: int = 12, admin_id: int | No
             bucket["sales_toman"] += int(r["toman"] or 0)
             bucket["sales_bytes"] += int(r["delta_bytes"] or 0)
             bucket["charge_count"] += 1
+            bucket["unlimited_count"] += int(r["unlimited"])
             meth = str(r["method"] or "")
             mk = meth + "_toman" if meth in ("cash", "card") else "other_toman"
             bucket[mk] += int(r["toman"] or 0)
             ab["sales_toman"] += int(r["toman"] or 0)
             ab["sales_bytes"] += int(r["delta_bytes"] or 0)
             ab["charge_count"] += 1
+            ab["unlimited_count"] += int(r["unlimited"])
         elif kind == "waive":
             # note embeds estimated toman; prefer row toman (0) + delta for volume
             # Store estimated waived value from note is fragile — use delta_bytes * we don't have price

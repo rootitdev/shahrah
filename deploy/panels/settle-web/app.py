@@ -2211,6 +2211,8 @@ def monthly_payload(months: int = 12, admin_id: int | None = None) -> dict:
         m["cost_h"] = fmt_toman(int(m["cost_toman"]))
         m["profit_h"] = fmt_toman(int(m["profit_toman"]))
         m["sales_bytes_h"] = fmt_gib(int(m["sales_bytes"]))
+        if m.get("unlimited_count"):
+            m["sales_bytes_h"] += f' + {m["unlimited_count"]} خرید نامحدود'
         m["waive_h"] = fmt_toman(int(m["waive_toman"]))
         m["cash_h"] = fmt_toman(int(m.get("cash_toman") or 0))
         m["card_h"] = fmt_toman(int(m.get("card_toman") or 0))
@@ -2221,6 +2223,8 @@ def monthly_payload(months: int = 12, admin_id: int | None = None) -> dict:
             ab["sales_h"] = fmt_toman(int(ab["sales_toman"]))
             ab["waive_h"] = fmt_toman(int(ab["waive_toman"]))
             ab["sales_bytes_h"] = fmt_gib(int(ab["sales_bytes"]))
+            if ab.get("unlimited_count"):
+                ab["sales_bytes_h"] += f' + {ab["unlimited_count"]} خرید نامحدود'
     return data
 
 
