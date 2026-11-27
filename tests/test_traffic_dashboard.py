@@ -60,3 +60,42 @@ def test_ingest_rollback_and_backup(tmp_path):
     backup(tmp_path/"backup",tmp_path/"restored")
     with closing(sqlite3.connect(tmp_path/"restored")) as db:
         assert db.execute("SELECT captured_ns,rx FROM snapshots").fetchall()==[(3,str(2**64-1))]
+
+def test_remote_interface_selection_applies_after_ack(tmp_path):
+    import io
+    import json
+    from collector import capture
+    from deliver import deliver
+
+    boot = tmp_path/"boot"
+    boot.write_text("12345678-1234-1234-1234-123456789abc")
+    for index,name in enumerate(("eth0","ens3"), start=1):
+        dev=tmp_path/name
+        (dev/"statistics").mkdir(parents=True)
+        (dev/"ifindex").write_text(str(index))
+        for field in ("rx_bytes", "tx_bytes"):
+            (dev/"statistics"/field).write_text("100")
+    db=tmp_path/"queue"
+    capture(db,"eth0",sysnet=tmp_path,boot_file=boot,now=lambda:1)
+
+    def receiver(req,timeout):
+        batch=json.loads(req.data)
+        assert batch["interface_settings"] and batch["samples"][0]["interface"]=="eth0"
+        return io.BytesIO(b'{"server":"ir","accepted":[1],"interface":"ens3"}')
+
+    deliver(db,"ir","test",send=receiver)
+    capture(db,"eth0",sysnet=tmp_path,boot_file=boot,now=lambda:2)
+    with closing(sqlite3.connect(db)) as c:
+        assert c.execute("SELECT interface FROM samples").fetchall()==[("ens3",)]
+
+
+def test_report_scenario_keeps_existing_netcup_rent(tmp_path):
+    from views import overview
+    with closing(sqlite3.connect(":memory:")) as db:
+        configure(db)
+        for host in ("nl","netcup"):
+            register(db,host,tmp_path/host)
+        page=overview(db,migrated=100,retained_rent=0)
+        assert "سناریوی جایگزین 3,000,000" in page
+        with pytest.raises(ValueError):
+            overview(db,migrated=101)

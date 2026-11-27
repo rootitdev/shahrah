@@ -9,6 +9,13 @@ from pathlib import Path
 
 def capture(database, interface, *, sysnet=Path("/sys/class/net"),
             boot_file=Path("/proc/sys/kernel/random/boot_id"), now=time.time_ns):
+    with closing(sqlite3.connect(database)) as db:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_setting'").fetchone():
+            row = db.execute("SELECT value FROM agent_setting WHERE key='interface'").fetchone()
+            if row:
+                proposed=row[0]
+                if re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,14}",proposed) and (sysnet/proposed/"ifindex").is_file():
+                    interface=proposed
     if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,14}", interface):
         raise ValueError("Invalid interface name")
     device = sysnet / interface

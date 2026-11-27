@@ -83,8 +83,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200,snapshot_csv(db),"text/csv; charset=utf-8",
                                   [("Content-Disposition",'attachment; filename="traffic.csv"')])
             try:
-                end=parse_qs(urlsplit(self.path).query).get("end",[None])[0]
-                content='<nav><a href="/settings">تنظیمات و ثبت مالی</a></nav>'+overview(db,end)
+                query=parse_qs(urlsplit(self.path).query,max_num_fields=6)
+                end=query.get("end",[None])[0]
+                content='<nav><a href="/settings">تنظیمات و ثبت مالی</a></nav>'+overview(
+                    db,end,migrated=int(query.get("migrated",["100"])[0]),
+                    retained_rent=int(query.get("retained",["0"])[0]))
             except ValueError:
                 return self.reply(400,document("تاریخ نامعتبر", '<a href="/">بازگشت</a>'))
             return self.reply(200,document("مصرف و هزینهٔ سرورها",content+
@@ -107,6 +110,10 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(batch,dict):
                         return self.reply(400)
                     result=accept(db,auth[7:],batch)
+                    if batch.get("interface_settings") is True:
+                        interface=db.execute("SELECT name FROM agent_interfaces WHERE host=?", (result["server"],)).fetchone()
+                        if interface:
+                            result["interface"]=interface[0]
                     return self.reply(200,json.dumps(result).encode(),"application/json")
                 if self.headers.get("Origin") not in (None,"https://traffic.argosatra.ir"):
                     return self.reply(403)

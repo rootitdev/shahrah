@@ -22,7 +22,9 @@ def timestamp(value):
     return f"{jalali(dt.date())}، {dt:%H:%M}"
 
 
-def overview(db, selected=None):
+def overview(db, selected=None, *, migrated=100, retained_rent=0):
+    if not 0 <= migrated <= 100 or not 0 <= retained_rent <= 100:
+        raise ValueError('Invalid scenario percentage')
     now=time.time_ns()
     today=local_day(now)
     end=min(today,date.fromisoformat(selected)) if selected else today
@@ -30,6 +32,8 @@ def overview(db, selected=None):
     body=[f'<p>دورهٔ شمسی {jalali(start)} تا {jalali(end)} · مبالغ به تومان</p>',
           '<form method="get"><label>تاریخ پایان گزارش <input type="date" name="end" value="'+end.isoformat()+'"></label><button>نمایش</button></form>']
     estimated_cost=Decimal(0)
+    network_bytes=0
+    exits={}
     for host,label,delivery in db.execute("SELECT id,label,last_delivery_ns FROM hosts ORDER BY label"):
         cursor=db.execute("SELECT * FROM tariffs WHERE host=? ORDER BY effective",(host,))
         fields=[entry[0] for entry in cursor.description]
@@ -59,6 +63,9 @@ def overview(db, selected=None):
         body.append(f'<p>هزینهٔ تخمینی ترافیک {number(totals["traffic_cost"])} · اجاره {number(totals["rent"])} · جمع {number(totals["traffic_cost"]+totals["rent"])}</p>')
         cost=totals["traffic_cost"]+totals["rent"]
         estimated_cost+=cost
+        network_bytes+=totals["rx"]+totals["tx"]
+        if host in ("nl","netcup"):
+            exits[host]=(usage,tariffs,totals)
         billed=db.execute("SELECT SUM(amount) FROM entries WHERE kind='invoice' AND host=? AND day BETWEEN ? AND ?",
                           (host,start.isoformat(),end.isoformat())).fetchone()[0]
         if billed is not None:
@@ -74,6 +81,32 @@ def overview(db, selected=None):
                 state="ثبت دستی"
             body.append(f'<tr><td>{jalali(day)}</td><td>{gb(used["rx"])}</td><td>{gb(used["tx"])}</td><td>{state}</td></tr>')
         body.append("</table></details></section>")
+    body.insert(1,f'<p>جمع ترافیک رابط‌های سرورها {gb(network_bytes)} GB · جمع هزینهٔ تخمینی {number(estimated_cost)} تومان</p>')
+    if len(exits)==2:
+        nl_usage,nl_tariffs,nl=exits["nl"]
+        nc_usage,nc_tariffs,nc=exits["netcup"]
+        left={}
+        moved={}
+        for day in nl_usage.keys() | nc_usage.keys():
+            original=nl_usage.get(day,day_usage())
+            destination=nc_usage.get(day,day_usage())
+            share=migrated if start<=day<=end else 0
+            left[day]={}
+            moved[day]={}
+            for key in ("rx","tx"):
+                transferred=original[key]*share//100
+                left[day][key]=original[key]-transferred
+                moved[day][key]=destination[key]+transferred
+        nl_alt,_=cost_report(left,nl_tariffs,start,end,now)
+        nc_alt,_=cost_report(moved,nc_tariffs,start,end,now)
+        alternative=(estimated_cost-nl["traffic_cost"]-nc["traffic_cost"]-nl["rent"]
+                     +nl_alt["traffic_cost"]+nc_alt["traffic_cost"]+nl["rent"]*retained_rent/100)
+        body.append(f'<details><summary>مقایسهٔ هلند و نت‌کاپ برای همین دوره</summary>'
+                    f'<form method="get"><input type="hidden" name="end" value="{end.isoformat()}">'
+                    f'<label>درصد ترافیک هلند منتقل‌شده به نت‌کاپ<input type="number" min="0" max="100" name="migrated" value="{migrated}"></label>'
+                    f'<label>درصد اجارهٔ هلند که همچنان پرداخت می‌شود<input type="number" min="0" max="100" name="retained" value="{retained_rent}"></label>'
+                    f'<button>محاسبهٔ سناریو</button></form><p>هزینهٔ چهار سرور {number(estimated_cost)} · سناریوی جایگزین {number(alternative)} · صرفه‌جویی {number(estimated_cost-alternative)} تومان</p>'
+                    '<p>محاسبه بر پایهٔ مصرف ثبت‌شدهٔ همین دوره است.</p></details>')
     sold,revenue=db.execute(
         "SELECT COALESCE(SUM(quantity),0),COALESCE(SUM(amount),0) FROM entries WHERE kind='sale' AND day BETWEEN ? AND ?",
         (start.isoformat(),end.isoformat())).fetchone()

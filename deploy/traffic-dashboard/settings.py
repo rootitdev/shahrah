@@ -21,6 +21,8 @@ def initialize_settings(db):
             amount INTEGER NOT NULL DEFAULT 0, quantity INTEGER NOT NULL DEFAULT 0,
             uploaded INTEGER NOT NULL DEFAULT 0,note TEXT NOT NULL,
             PRIMARY KEY(host,day,kind));
+        CREATE TABLE IF NOT EXISTS agent_interfaces(
+            host TEXT PRIMARY KEY REFERENCES hosts(id), name TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS journal(
             id INTEGER PRIMARY KEY,ts INTEGER NOT NULL,actor TEXT NOT NULL,
             action TEXT NOT NULL, details TEXT NOT NULL);
@@ -84,6 +86,12 @@ def save(db,form,actor):
                 DO UPDATE SET amount=excluded.amount,quantity=excluded.quantity,
                 uploaded=excluded.uploaded,note=excluded.note""",
                 ("" if action=="sale" else host,dt,action,amount,quantity,uploaded,note))
+        elif action=="interface":
+            name=form["interface"].strip()
+            if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,14}",name):
+                raise ValueError("invalid interface")
+            db.execute("INSERT INTO agent_interfaces VALUES(?,?) ON CONFLICT(host) DO UPDATE SET name=excluded.name",
+                       (host,name))
         elif action=="label":
             label=form["label"].strip()
             if not 1<=len(label)<=80:
@@ -131,6 +139,13 @@ def settings(db):
                    form("invoice",host,field("تومان","amount",0,"number"))+'</details>')
         out.append('<details><summary>مصرف تاریخی پیش از نصب</summary>'+
                    form("opening",host,field("دانلود GB","quantity")+field("آپلود GB","uploaded"))+'</details>')
+        desired=db.execute("SELECT name FROM agent_interfaces WHERE host=?", (host,)).fetchone()
+        observed=db.execute("SELECT interface FROM snapshots WHERE host=? ORDER BY captured_ns DESC LIMIT 1", (host,)).fetchone()
+        observed_name=observed[0] if observed else "نامشخص"
+        out.append('<details><summary>رابط شبکه برای آمارگیری</summary><p>آخرین رابط گزارش‌شده: '
+                   +esc(observed_name)+' · تنظیم در ارسال بعدی به عامل می‌رسد.</p>'
+                   +form("interface",host,field("رابط عمومی", "interface",desired[0] if desired else (observed[0] if observed else "eth0")))
+                   +'</details>')
         out.append('<details><summary>نام نمایشی</summary>'+form("label",host,field("نام سرور","label",label))+'</details></section>')
     out.append('<details><summary>تاریخچهٔ تغییرات اخیر</summary><ol>')
     for stamp,action,details in db.execute("SELECT ts,action,details FROM journal ORDER BY id DESC LIMIT 100"):
