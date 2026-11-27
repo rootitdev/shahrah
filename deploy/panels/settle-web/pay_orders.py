@@ -12,11 +12,41 @@ from pathlib import Path
 from typing import Callable
 
 GIB = 1024**3
+MAX_PLAN_DAYS = 3650
+MAX_PLAN_HOURS = 8760  # 365 days
 ORDER_TTL_SEC = 10 * 60  # 10 minutes for customer card transfer
 PAY_SUFFIX_DIGITS = 3  # default; overridable via create_order(suffix_digits=)
 # New /pay/ signups land under this PasarGuard admin (owner by default).
 PUBLIC_SIGNUP_ADMIN_ID = 1
 SECRETS_PATH = Path("/root/.vpn-secrets/.env")
+
+
+def _coerce_duration(days: int | float | None, hours: int | float | None) -> tuple[int, int]:
+    days_v = max(0, int(days or 0))
+    hours_v = max(0, int(hours or 0))
+    if days_v > MAX_PLAN_DAYS or hours_v > MAX_PLAN_HOURS:
+        raise ValueError("مدت پلن بیش از حد مجاز است.")
+    total_sec = days_v * 86400 + hours_v * 3600
+    if total_sec < 3600:
+        raise ValueError("مدت پلن باید حداقل ۱ ساعت باشد (روز و/یا ساعت).")
+    if total_sec > MAX_PLAN_DAYS * 86400:
+        raise ValueError("مدت پلن بیش از حد مجاز است.")
+    return days_v, hours_v
+
+
+def duration_seconds(days: int, hours: int = 0) -> int:
+    d, h = _coerce_duration(days, hours)
+    return d * 86400 + h * 3600
+
+
+def duration_label(days: int, hours: int = 0) -> str:
+    d, h = int(days or 0), int(hours or 0)
+    bits: list[str] = []
+    if d:
+        bits.append(f"{d} روز")
+    if h:
+        bits.append(f"{h} ساعت")
+    return " / ".join(bits)
 
 
 def _panel_base() -> str:
@@ -102,6 +132,8 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE pay_plan ADD COLUMN promo INTEGER NOT NULL DEFAULT 0"
         )
+    if "hours" not in pcols:
+        conn.execute("ALTER TABLE pay_plan ADD COLUMN hours INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_pay_plan_admin ON pay_plan(admin_id, active)"
     )
@@ -144,6 +176,8 @@ def ensure_tables(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE pay_order ADD COLUMN signup_password TEXT NOT NULL DEFAULT ''"
         )
+    if "hours" not in ocols:
+        conn.execute("ALTER TABLE pay_order ADD COLUMN hours INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS pay_username_reserve (
             username TEXT PRIMARY KEY,
@@ -372,7 +406,7 @@ def list_plans(
     conn: sqlite3.Connection, admin_id: int, *, active_only: bool = False
 ) -> list[dict]:
     sql = (
-        "SELECT id, admin_id, title, gib, days, price_toman, user_count, active, fair_use, promo, description, created_ts "
+        "SELECT id, admin_id, title, gib, days, hours, price_toman, user_count, active, fair_use, promo, description, created_ts "
         "FROM pay_plan WHERE admin_id=?"
     )
     args: list = [admin_id]
@@ -401,9 +435,10 @@ def add_plan(
     user_count: int = 1,
     description: str = "",
     promo: bool = False,
+    hours: int = 0,
 ) -> dict:
     gib = float(gib)
-    days = int(days)
+    days_v, hours_v = _coerce_duration(days, hours)
     price = int(price_toman)
     users = max(1, min(1000, int(user_count or 1)))
     # gib == 0 → unlimited volume plan (only admin #1)
@@ -411,22 +446,22 @@ def add_plan(
         raise ValueError("حجم پلن نامعتبر است.")
     if gib == 0 and int(admin_id) != UNLIMITED_ADMIN_ID:
         raise ValueError("فقط ادمین اصلی می‌تواند پلن نامحدود تعریف کند.")
-    if days < 1 or days > 3650:
-        raise ValueError("روز پلن نامعتبر است.")
     if price < 1000 or price > 500_000_000:
         raise ValueError("قیمت پلن نامعتبر است.")
+    dur = duration_label(days_v, hours_v)
     if gib == 0:
-        title = (title or "").strip()[:80] or f"نامحدود / {days} روز"
+        title = (title or "").strip()[:80] or f"نامحدود / {dur}"
     else:
-        title = (title or "").strip()[:80] or f"{gib:g} گیگ / {days} روز"
+        title = (title or "").strip()[:80] or f"{gib:g} گیگ / {dur}"
     conn.execute(
-        "INSERT INTO pay_plan(admin_id, title, gib, days, price_toman, user_count, active, created_ts, description, promo) "
-        "VALUES (?,?,?,?,?,?,1,?,?,?)",
+        "INSERT INTO pay_plan(admin_id, title, gib, days, hours, price_toman, user_count, active, created_ts, description, promo) "
+        "VALUES (?,?,?,?,?,?,?,1,?,?,?)",
         (
             int(admin_id),
             title,
             gib,
-            days,
+            days_v,
+            hours_v,
             price,
             users,
             time.time(),
@@ -446,6 +481,7 @@ def update_plan(
     title: str | None = None,
     gib: float | None = None,
     days: int | None = None,
+    hours: int | None = None,
     price_toman: int | None = None,
     user_count: int | None = None,
     active: bool | None = None,
@@ -461,6 +497,8 @@ def update_plan(
     title_v = str(row["title"] if title is None else (title or "").strip()[:80])
     gib_v = float(row["gib"] if gib is None else gib)
     days_v = int(row["days"] if days is None else days)
+    hours_v = int(row.get("hours") or 0 if hours is None else hours)
+    days_v, hours_v = _coerce_duration(days_v, hours_v)
     price_v = int(row["price_toman"] if price_toman is None else price_toman)
     users_v = max(
         1,
@@ -473,14 +511,14 @@ def update_plan(
     desc_v = str((row["description"] or "") if description is None else (description or "").strip()[:2000])
     fair_v = int((row["fair_use"] or 0) if fair_use is None else (1 if fair_use else 0))
     promo_v = int((row["promo"] or 0) if promo is None else (1 if promo else 0))
-    if gib_v < 0 or days_v < 1 or price_v < 1000:
+    if gib_v < 0 or price_v < 1000:
         raise ValueError("مقادیر پلن نامعتبر است.")
     owner = int(row["admin_id"])
     if gib_v == 0 and owner != UNLIMITED_ADMIN_ID:
         raise ValueError("فقط ادمین اصلی می‌تواند پلن نامحدود داشته باشد.")
     conn.execute(
-        "UPDATE pay_plan SET title=?, gib=?, days=?, price_toman=?, user_count=?, active=?, fair_use=?, promo=?, description=? WHERE id=?",
-        (title_v, gib_v, days_v, price_v, users_v, active_v, fair_v, promo_v, desc_v, plan_id),
+        "UPDATE pay_plan SET title=?, gib=?, days=?, hours=?, price_toman=?, user_count=?, active=?, fair_use=?, promo=?, description=? WHERE id=?",
+        (title_v, gib_v, days_v, hours_v, price_v, users_v, active_v, fair_v, promo_v, desc_v, plan_id),
     )
     return dict(conn.execute("SELECT * FROM pay_plan WHERE id=?", (plan_id,)).fetchone())
 
@@ -559,10 +597,10 @@ def create_order(
     ttl = max(60, min(24 * 3600, ttl))
     expires = now + ttl
     conn.execute(
-        "INSERT INTO pay_order(admin_id, user_id, username, plan_id, gib, days, "
+        "INSERT INTO pay_order(admin_id, user_id, username, plan_id, gib, days, hours, "
         "price_toman, pay_amount, status, ts, expires_ts, paid_ts, detail, "
         "mobile, display_name, is_signup, signup_password) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             int(admin_id),
             int(user_id),
@@ -570,6 +608,7 @@ def create_order(
             int(plan["id"]),
             float(plan["gib"]),
             int(plan["days"]),
+            int(plan.get("hours") or 0),
             int(plan["price_toman"]),
             pay_amount,
             "pending",
@@ -761,12 +800,13 @@ def reset_user_usage(username: str) -> dict:
         return _panel_request("POST", f"/api/user/by-id/{int(uid)}/reset")
 
 
-def apply_topup(username: str, gib: float, days: int) -> dict:
+def apply_topup(username: str, gib: float, days: int, hours: int = 0) -> dict:
     """Renew pack: set data_limit to purchased size, reset used_traffic to 0, extend expire.
 
     Previous ceiling/usage does not carry into the new period.
     gib <= 0 means unlimited volume (panel data_limit = 0).
     """
+    days_v, hours_v = _coerce_duration(days, hours)
     user = fetch_panel_user(username)
     cur_limit = int(user.get("data_limit") or 0)
     old_used = int(user.get("used_traffic") or 0)
@@ -797,7 +837,7 @@ def apply_topup(username: str, gib: float, days: int) -> dict:
             base = now
     if base < now:
         base = now
-    new_exp = base + int(days) * 86400
+    new_exp = base + duration_seconds(days_v, hours_v)
 
     uname = urllib.parse.quote(username, safe="")
     # Reset usage first so old traffic does not count against the new pack.
@@ -816,7 +856,8 @@ def apply_topup(username: str, gib: float, days: int) -> dict:
         "old_expire": cur_exp,
         "new_expire": updated.get("expire") or new_exp,
         "add_bytes": pack_bytes,
-        "days": int(days),
+        "days": days_v,
+        "hours": hours_v,
         "usage_reset": True,
     }
 
@@ -886,6 +927,7 @@ def create_panel_user(
     note: str,
     gib: float,
     days: int,
+    hours: int = 0,
     group_ids: list[int] | None = None,
 ) -> dict:
     """Create a new PasarGuard user after successful signup payment."""
@@ -900,7 +942,7 @@ def create_panel_user(
         "status": "active",
         "note": (note or "")[:200],
         "data_limit": data_limit,
-        "expire": now + max(1, int(days)) * 86400,
+        "expire": now + duration_seconds(int(days), int(hours)),
         "data_limit_reset_strategy": "no_reset",
         "group_ids": group_ids or [1],
     }
@@ -911,7 +953,7 @@ def fulfill_order(
     conn: sqlite3.Connection,
     order_id: int,
     *,
-    apply: Callable[[str, float, int], dict] | None = None,
+    apply: Callable[..., dict] | None = None,
 ) -> dict:
     row = conn.execute("SELECT * FROM pay_order WHERE id=?", (order_id,)).fetchone()
     if not row:
@@ -945,6 +987,7 @@ def fulfill_order(
                 note=note,
                 gib=float(order["gib"]),
                 days=int(order["days"]),
+                hours=int(order.get("hours") or 0),
             )
         except Exception as e:  # noqa: BLE001
             conn.execute(
@@ -967,7 +1010,12 @@ def fulfill_order(
                 "created": True,
             }
         else:
-            result = fn(str(order["username"]), float(order["gib"]), int(order["days"]))
+            result = fn(
+                str(order["username"]),
+                float(order["gib"]),
+                int(order["days"]),
+                int(order.get("hours") or 0),
+            )
             if created:
                 result["created"] = True
     except Exception as e:  # noqa: BLE001
@@ -979,7 +1027,8 @@ def fulfill_order(
 
     if created:
         detail = (
-            f"اکانت جدید ساخته شد · {order['gib']}GiB / {order['days']}d "
+            f"اکانت جدید ساخته شد · {order['gib']}GiB / "
+            f"{duration_label(int(order['days']), int(order.get('hours') or 0))} "
             f"· موبایل {order.get('mobile') or '-'}"
         )
         uid = int(created.get("id") or 0)
@@ -992,7 +1041,8 @@ def fulfill_order(
     else:
         detail = (
             f"تمدید شد · سقف {result.get('old_limit')}→{result.get('new_limit')} "
-            f"(مصرف قبلی ریست) · {order['gib']}GiB / {order['days']}d"
+            f"(مصرف قبلی ریست) · {order['gib']}GiB / "
+            f"{duration_label(int(order['days']), int(order.get('hours') or 0))}"
         )
     now = time.time()
     conn.execute(

@@ -593,7 +593,8 @@ def process_sms_webhook(
                 "شارژ خودکار مشتری (/pay/)\n"
                 f"سفارش: #{pay_hit['id']}\n"
                 f"یوزر: {pay_hit.get('username')} (ادمین #{aid_hit})\n"
-                f"پلن: {pay_hit.get('gib')} گیگ / {pay_hit.get('days')} روز\n"
+                f"پلن: {pay_hit.get('gib')} گیگ / "
+                f"{pay.duration_label(int(pay_hit.get('days') or 0), int(pay_hit.get('hours') or 0))}\n"
                 f"واریز: {fmt_toman(amount)}\n"
                 f"{fulfilled.get('detail') or ''}"
             )
@@ -1774,6 +1775,8 @@ def lookup_pay_user(username: str) -> dict:
                 "title": p["title"],
                 "gib": float(p["gib"]),
                 "days": int(p["days"]),
+                "hours": int(p.get("hours") or 0),
+                "duration_h": pay.duration_label(int(p["days"]), int(p.get("hours") or 0)),
                 "user_count": max(1, int(p.get("user_count") or 1)),
                 "users_h": f"{max(1, int(p.get('user_count') or 1))} کاربره",
                 "unlimited": float(p["gib"]) <= 0,
@@ -1826,6 +1829,8 @@ def _order_public(order: dict | None) -> dict | None:
         "admin_id": int(order["admin_id"]),
         "gib": float(order["gib"]),
         "days": int(order["days"]),
+        "hours": int(order.get("hours") or 0),
+        "duration_h": pay.duration_label(int(order["days"]), int(order.get("hours") or 0)),
         "price_toman": int(order["price_toman"]),
         "price_h": fmt_toman(int(order["price_toman"])),
         "pay_amount": int(order["pay_amount"]),
@@ -2065,6 +2070,8 @@ def shop_payload(admin_id: int) -> dict:
         p["users_h"] = f"{uc} کاربره"
         p["fair_use"] = bool(int(p.get("fair_use") or 0))
         p["promo"] = bool(int(p.get("promo") or 0))
+        p["hours"] = int(p.get("hours") or 0)
+        p["duration_h"] = pay.duration_label(int(p.get("days") or 0), p["hours"])
     pending_pub = []
     for o in pending:
         pub = _order_public(o)
@@ -3475,7 +3482,8 @@ body.ro .pay-box.on { display:block; }
     <div class="shop-row shop-row-plan">
       <label class="hint shop-plan-title">عنوان<input id="shop-title" placeholder="۵۰ گیگ ماهانه"></label>
       <label class="hint">گیگ<input id="shop-gib" type="number" min="0.1" step="0.1"></label>
-      <label class="hint">روز<input id="shop-days" type="number" min="1" step="1"></label>
+      <label class="hint">روز<input id="shop-days" type="number" min="0" step="1" value="0"></label>
+      <label class="hint">ساعت<input id="shop-hours" type="number" min="0" step="1" value="0"></label>
       <label class="hint">تعداد کاربر<input id="shop-users" type="number" min="1" max="1000" step="1" value="1"></label>
       <label class="hint">قیمت تومان<input id="shop-price" type="number" min="1000" step="1000"></label>
       <label class="hint shop-plan-desc">توضیحات (اختیاری)<textarea id="shop-desc" rows="2" placeholder="مثلاً: مناسب استفاده روزمره"></textarea></label>
@@ -3485,6 +3493,7 @@ body.ro .pay-box.on { display:block; }
       </div>
       <button class="btn shop-row-btn" id="shop-plan-add" type="button">افزودن پلن</button>
     </div>
+    <p class="hint" style="margin-top:8px">مدت اکانت بعد از شارژ: روز و/یا ساعت (حداقل ۱ ساعت). مثال ۱۰ ساعته: روز=۰، ساعت=۱۰.</p>
   </section>
   <section class="card"><h2>پلن‌های فعال</h2><div id="shop-plans"></div></section>
 </div>
@@ -3611,6 +3620,14 @@ body.ro .pay-box.on { display:block; }
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
+function planDuration(p){
+  if (!p) return '';
+  if (p.duration_h) return p.duration_h;
+  const bits = [];
+  if (Number(p.days)) bits.push(p.days + ' روز');
+  if (Number(p.hours)) bits.push(p.hours + ' ساعت');
+  return bits.length ? bits.join(' / ') : '—';
+}
 const params = new URLSearchParams(location.search);
 let adminId = params.get('id');
 const segs = location.pathname.replace(/\\/+$/,'').split('/').filter(Boolean);
@@ -4206,11 +4223,11 @@ async function loadShop(){
   const box = $('shop-plans');
   if (!d.plans || !d.plans.length) box.innerHTML = '<div class="empty">پلنی نیست.</div>';
   else {
-    box.innerHTML = `<table><thead><tr><th>عنوان</th><th>حجم</th><th>روز</th><th>کاربر</th><th>قیمت</th><th>وضعیت</th><th>حجم منصفانه</th><th>فروش ویژه</th><th></th></tr></thead><tbody>${
+    box.innerHTML = `<table><thead><tr><th>عنوان</th><th>حجم</th><th>مدت</th><th>کاربر</th><th>قیمت</th><th>وضعیت</th><th>حجم منصفانه</th><th>فروش ویژه</th><th></th></tr></thead><tbody>${
       d.plans.map(p => `<tr class="${p.promo?'plan-promo-row':''}">
         <td>${esc(p.title)}${p.fair_use?' <span class="fair-badge">حجم منصفانه</span>':''}${p.promo?' <span class="promo-badge">ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}</td>
         <td class="num">${esc(p.volume_h || p.gib)}</td>
-        <td class="num">${p.days}</td>
+        <td class="num">${esc(planDuration(p))}</td>
         <td class="num">${esc(p.users_h || ((p.user_count||1)+' کاربره'))}</td>
         <td class="num">${esc(p.price_h)}</td>
         <td>${p.active?'فعال':'خاموش'}</td>
@@ -4239,7 +4256,7 @@ async function loadShop(){
         tr.innerHTML = `
           <td><input class="pe-title" value="${esc(p.title)}" style="min-width:120px"><textarea class="pe-desc" rows="2" placeholder="توضیحات (اختیاری)" style="display:block;width:100%;min-width:160px;margin-top:4px">${esc(p.description||'')}</textarea></td>
           <td><input class="pe-gib" type="number" min="0" step="0.1" value="${Number(p.gib)}" style="width:80px" title="0 = نامحدود"></td>
-          <td><input class="pe-days" type="number" min="1" value="${p.days}" style="width:70px"></td>
+          <td><input class="pe-days" type="number" min="0" value="${p.days}" style="width:55px" title="روز"> <input class="pe-hours" type="number" min="0" value="${p.hours||0}" style="width:55px" title="ساعت"></td>
           <td><input class="pe-users" type="number" min="1" value="${p.user_count||1}" style="width:60px"></td>
           <td><input class="pe-price" type="number" min="1000" step="1000" value="${p.price_toman}" style="width:110px"></td>
           <td><label><input type="checkbox" class="pe-active" ${p.active?'checked':''}> فعال</label></td>
@@ -4252,6 +4269,7 @@ async function loadShop(){
           try {
             await api('api/shop', {action:'update_plan', admin_id: shopAdminId, id: Number(p.id),
               title: q('.pe-title').value, gib: Number(q('.pe-gib').value||0), days: Number(q('.pe-days').value||0),
+              hours: Number(q('.pe-hours').value||0),
               user_count: Number(q('.pe-users').value||1), price_toman: Number(q('.pe-price').value||0),
               active: q('.pe-active').checked, fair_use: q('.pe-fair').checked, promo: q('.pe-promo').checked, description: q('.pe-desc').value});
             flash('پلن ویرایش شد.', 'ok'); loadShop();
@@ -4311,7 +4329,7 @@ function renderShopMode(d){
           <td><b>${esc(o.username)}</b><div class="mut">#${o.id}${o.is_signup?' · ثبت‌نام':''}</div></td>
           <td class="num" dir="ltr">${esc(o.mobile || '—')}</td>
           <td class="num">${esc(o.pay_h)}</td>
-          <td class="mut">${(Number(o.gib)||0)<=0?'نامحدود':(o.gib+' گیگ')} / ${o.days} روز</td>
+          <td class="mut">${(Number(o.gib)||0)<=0?'نامحدود':(o.gib+' گیگ')} / ${esc(planDuration(o))}</td>
           <td class="mut">${Math.max(0,Math.floor(o.expires_in/60))} دقیقه</td>
           <td style="white-space:nowrap">
             <button class="btn shop-approve" type="button" data-id="${o.id}" style="padding:6px 10px;font-size:12px">تأیید و شارژ</button>
@@ -4430,13 +4448,16 @@ if ($('shop-plan-add')) $('shop-plan-add').onclick = async () => {
       title: $('shop-title').value,
       gib: unlim ? 0 : Number($('shop-gib').value||0),
       days: Number($('shop-days').value||0),
+      hours: Number(($('shop-hours') && $('shop-hours').value) || 0),
       user_count: Number(($('shop-users') && $('shop-users').value) || 1),
       price_toman: Number($('shop-price').value||0),
       description: ($('shop-desc') && $('shop-desc').value) || '',
       promo: !!( $('shop-promo') && $('shop-promo').checked ),
     });
     flash('پلن اضافه شد.', 'ok');
-    $('shop-title').value=''; $('shop-gib').value=''; $('shop-days').value=''; $('shop-price').value='';
+    $('shop-title').value=''; $('shop-gib').value=''; $('shop-days').value='0';
+    if ($('shop-hours')) $('shop-hours').value='0';
+    $('shop-price').value='';
     if ($('shop-desc')) $('shop-desc').value='';
     if ($('shop-users')) $('shop-users').value='1';
     if ($('shop-unlim')) { $('shop-unlim').checked=false; $('shop-gib').disabled=false; }
@@ -5275,6 +5296,7 @@ class Handler(BaseHTTPRequestHandler):
                             title=str(data.get("title") or ""),
                             gib=float(data.get("gib") or 0),
                             days=as_int(data.get("days")),
+                            hours=as_int(data.get("hours")),
                             price_toman=as_int(data.get("price_toman") or data.get("price")),
                             user_count=as_int(data.get("user_count") or data.get("users") or 1),
                             description=str(data.get("description") or ""),
@@ -5290,6 +5312,7 @@ class Handler(BaseHTTPRequestHandler):
                             title=None if data.get("title") is None else str(data.get("title") or ""),
                             gib=None if data.get("gib") in (None, "") else float(data.get("gib")),
                             days=None if data.get("days") in (None, "") else as_int(data.get("days")),
+                            hours=None if data.get("hours") in (None, "") else as_int(data.get("hours")),
                             price_toman=(
                                 None
                                 if data.get("price_toman") in (None, "") and data.get("price") in (None, "")

@@ -407,6 +407,14 @@ function applyWelcome(u){
   if (title) $('welcome-title').textContent = title;
   if (body) $('welcome-body').textContent = body;
 }
+function durPlan(p){
+  if (!p) return '—';
+  if (p.duration_h) return p.duration_h;
+  const bits = [];
+  if (Number(p.days)) bits.push(p.days + ' روز');
+  if (Number(p.hours)) bits.push(p.hours + ' ساعت');
+  return bits.length ? bits.join(' / ') : '—';
+}
 async function api(path, body){
   const opt = body !== undefined ? {method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)} : {};
   const r = await fetch(path, opt);
@@ -437,7 +445,7 @@ function renderUser(u){
     box.innerHTML = '<div class="mut">بسته‌ای تعریف نشده است.</div>';
   } else {
     box.innerHTML = u.plans.map(p =>
-      `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h|| (p.gib+' گیگ'))} | ${p.days} روز | ${esc(p.users_h || ((p.user_count||1)+' کاربره'))}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
+      `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h|| (p.gib+' گیگ'))} | ${esc(durPlan(p))} | ${esc(p.users_h || ((p.user_count||1)+' کاربره'))}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
     ).join('');
     box.querySelectorAll('.plan').forEach(el => {
       el.onclick = () => createOrder(Number(el.dataset.id));
@@ -460,7 +468,7 @@ function showPay(order, user){
   const vol = (Number(order.gib)||0) <= 0 ? 'نامحدود' : (order.gib + ' گیگ');
   const usersN = Number(order.user_count || (state.user && state.user.plans && state.user.plans.find(x => x.id===order.plan_id) && state.user.plans.find(x => x.id===order.plan_id).user_count) || 1);
   const usersTxt = (usersN > 0 ? (usersN + ' کاربره') : '');
-  $('pay-plan').textContent = vol + ' / ' + order.days + ' روز' + (usersTxt ? (' | ' + usersTxt) : '') + ' | سفارش #' + order.id;
+  $('pay-plan').textContent = vol + ' / ' + durPlan(order) + (usersTxt ? (' | ' + usersTxt) : '') + ' | سفارش #' + order.id;
   renderCardQr(state.order._card_digits);
   tickTimer();
   if (state.timer) clearInterval(state.timer);
@@ -551,7 +559,7 @@ function renderSignupPlansIfReady(){
   if (wrap) wrap.hidden = false;
   if (hint) hint.hidden = true;
   box.innerHTML = d.plans.map(p =>
-    `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h)} | ${p.days} روز | ${esc(p.users_h)}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
+    `<div class="plan${p.promo?' promo':''}" data-id="${p.id}"><div><b>${esc(p.title)}</b>${p.fair_use?'<span class="fair-badge">حجم منصفانه</span>':''}${p.promo?'<span class="promo-badge">فروش ویژه</span>':''}${p.description?`<div class="plan-desc">${esc(p.description)}</div>`:''}<div class="mut">${esc(p.volume_h)} | ${esc(durPlan(p))} | ${esc(p.users_h)}</div></div><div><b>${esc(p.price_h)}</b></div></div>`
   ).join('');
   box.querySelectorAll('.plan').forEach(el => {
     el.onclick = () => signupBuy(Number(el.dataset.id));
