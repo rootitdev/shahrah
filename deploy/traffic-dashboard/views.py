@@ -70,8 +70,16 @@ def overview(db, selected=None, *, migrated=100, retained_rent=0):
                           (host,start.isoformat(),end.isoformat())).fetchone()[0]
         if billed is not None:
             body.append(f'<p>فاکتورهای ثبت‌شده در بازه {number(billed)} تومان · اختلاف با برآورد {number(billed-cost)} تومان</p>')
-        body.append('<details><summary>جزئیات روزانه</summary><table><tr><th>روز</th><th>دانلود GB</th><th>آپلود GB</th><th>وضعیت اندازه‌گیری</th></tr>')
-        for day,used,_,_ in reversed(days):
+        visible_days = [
+            item for item in days
+            if item[1].get("covered_ns") or item[1].get("manual")
+            or item[1].get("rx") or item[1].get("tx")
+        ]
+        if not visible_days:
+            body.append('<p>هنوز نمونه‌ای برای نمایش روزانه دریافت نشده است.</p>')
+        else:
+            body.append('<details><summary>جزئیات روزانه</summary><table><tr><th>روز</th><th>دانلود GB</th><th>آپلود GB</th><th>وضعیت اندازه‌گیری</th></tr>')
+        for day,used,_,_ in reversed(visible_days):
             state="کامل"
             if not used["covered_ns"] or used["gap"] or used["covered_ns"]<86400*NS:
                 state="پوشش ناقص"
@@ -80,7 +88,8 @@ def overview(db, selected=None, *, migrated=100, retained_rent=0):
             if used.get("manual"):
                 state="ثبت دستی"
             body.append(f'<tr><td>{jalali(day)}</td><td>{gb(used["rx"])}</td><td>{gb(used["tx"])}</td><td>{state}</td></tr>')
-        body.append("</table></details></section>")
+        if visible_days:
+            body.append("</table></details></section>")
     body.insert(1,f'<p>جمع ترافیک رابط‌های سرورها {gb(network_bytes)} GB · جمع هزینهٔ تخمینی {number(estimated_cost)} تومان</p>')
     if len(exits)==2:
         nl_usage,nl_tariffs,nl=exits["nl"]
