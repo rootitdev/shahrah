@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
-from reporting import TEHRAN, jalali, midnight
+from reporting import TEHRAN, jalali, jalali_to_gregorian, midnight
 
 esc = html.escape
 GB = 10**9
@@ -51,7 +51,7 @@ def save(db,form,actor):
     host=form.get("host","")
     if action!="sale" and not db.execute("SELECT 1 FROM hosts WHERE id=?",(host,)).fetchone():
         raise ValueError("unknown host")
-    day=date.fromisoformat(form["day"])
+    day=jalali_to_gregorian(form["day"])
     if not date(2000,1,1)<=day<=date(2100,12,31):
         raise ValueError("invalid date")
     dt=day.isoformat()
@@ -116,16 +116,16 @@ def select(label,name,items,current):
 
 
 def settings(db):
-    today=datetime.now(TEHRAN).date().isoformat()
+    today=jalali(datetime.now(TEHRAN).date())
     def form(action,host,body):
         return (f'<form method="post" action="/settings"><input type="hidden" name="action" value="{action}">'
-                f'<input type="hidden" name="host" value="{esc(host)}">'+field("تاریخ اثر","day",today,"date")
+                f'<input type="hidden" name="host" value="{esc(host)}">'+field("تاریخ شمسی اثر","day",today,"text")
                 +body+field("توضیح ثبت یا اصلاح","note")+'<button>ذخیره</button></form>')
     out=['<nav><a href="/">گزارش مصرف</a> · <a href="/export">خروجی CSV نمونه‌ها</a></nav>']
     out.append('<details><summary>حجم و درآمد فروش روزانه</summary><p>ثبت دوباره برای همان روز، جمع روز را اصلاح می‌کند.</p>'+
                form("sale","",field("گیگابایت فروخته‌شده","quantity")+field("درآمد کل روز (تومان)","amount",0,"number"))+'</details>')
     for host,label in db.execute("SELECT id,label FROM hosts ORDER BY label"):
-        t=db.execute("SELECT direction,allowance,rate,mode,rent,unit,calendar,reset FROM tariffs WHERE host=? AND effective<=? ORDER BY effective DESC LIMIT 1",(host,today)).fetchone()
+        t=db.execute("SELECT direction,allowance,rate,mode,rent,unit,calendar,reset FROM tariffs WHERE host=? ORDER BY effective DESC LIMIT 1",(host,)).fetchone()
         if not t:
             continue
         out.append(f'<section><h2>{esc(label)}</h2><details><summary>تعرفه و دورهٔ ارائه‌دهنده</summary>'+
