@@ -1,0 +1,10 @@
+[Unit]
+Description=Deliver traffic samples at 06:00 Tehran
+
+[Timer]
+OnCalendar=*-*-* 06:00:00 Asia/Tehran
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

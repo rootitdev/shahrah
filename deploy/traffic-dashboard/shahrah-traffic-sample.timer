@@ -1,0 +1,10 @@
+[Unit]
+Description=Sample Shahrah traffic at Tehran midnight and noon
+
+[Timer]
+OnCalendar=*-*-* 00,12:00:00 Asia/Tehran
+AccuracySec=1s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,16 @@
+[Unit]
+Description=Deliver queued Shahrah traffic samples
+After=network-online.target shahrah-traffic-sample.service
+
+[Service]
+Type=oneshot
+User=shahrah-traffic-agent
+DynamicUser=yes
+StateDirectory=shahrah-traffic-agent
+StateDirectoryMode=0700
+EnvironmentFile=/etc/shahrah-traffic/agent.env
+LoadCredential=token:/etc/shahrah-traffic/token
+ExecStart=/usr/bin/python3 /opt/shahrah-traffic/deliver.py --database /var/lib/shahrah-traffic-agent/queue.db --server ${SERVER} --token-file %d/token
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes

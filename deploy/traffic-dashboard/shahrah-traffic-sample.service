@@ -1,0 +1,15 @@
+[Unit]
+Description=Record Shahrah public-interface counters
+
+[Service]
+Type=oneshot
+User=shahrah-traffic-agent
+DynamicUser=yes
+StateDirectory=shahrah-traffic-agent
+StateDirectoryMode=0700
+EnvironmentFile=/etc/shahrah-traffic/agent.env
+ExecStart=/usr/bin/python3 /opt/shahrah-traffic/collector.py --database /var/lib/shahrah-traffic-agent/queue.db --interface ${INTERFACE}
+NoNewPrivileges=yes
+PrivateNetwork=no
+ProtectSystem=strict
+ProtectHome=yes
