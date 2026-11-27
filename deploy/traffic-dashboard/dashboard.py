@@ -65,7 +65,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type",kind)
         self.send_header("Cache-Control","no-store")
         self.send_header("X-Content-Type-Options","nosniff")
-        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src https://static.cloudflareinsights.com; img-src 'self' data:; connect-src https://cloudflareinsights.com https://*.cloudflareinsights.com; form-action 'self'; frame-ancestors 'none'")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src https://static.cloudflareinsights.com; img-src 'self' data:; connect-src 'self' https://cloudflareinsights.com https://*.cloudflareinsights.com; form-action 'self'; frame-ancestors 'none'")
         self.send_header("Content-Length",str(len(body)))
         self.end_headers()
         self.wfile.write(body)
