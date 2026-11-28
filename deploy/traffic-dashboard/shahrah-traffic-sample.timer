@@ -2,7 +2,8 @@
 Description=Sample Shahrah traffic at Tehran midnight and noon
 
 [Timer]
-OnCalendar=*-*-* 00,12:00:00 Asia/Tehran
+OnCalendar=*-*-* 00:00:00 Asia/Tehran
+OnCalendar=*-*-* 12:00:00 Asia/Tehran
 AccuracySec=1s
 Persistent=true
 
